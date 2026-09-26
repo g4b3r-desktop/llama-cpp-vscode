@@ -1,27 +1,82 @@
 # llama.cpp Assistant for VS Code
 
-A VS Code extension that turns a local or remote `llama.cpp` server into a coding assistant with native VS Code Chat integration, inline autocomplete, code actions, RAG, Markdown streaming, performance metrics, and Copilot-style inline suggestion controls.
+A VS Code extension that turns a local or remote `llama.cpp` server into a coding assistant with native VS Code Chat integration, autonomous agent tools, inline autocomplete, code actions, RAG, Markdown streaming, performance metrics, and Copilot-style inline suggestion controls.
+
+## v0.8.0 highlights — local Agent Mode
+
+Use the native Chat participant with:
+
+```text
+@llama /agent fix the failing tests and verify the solution
+```
+
+The agent works as a controlled tool loop: the model chooses an action, the extension executes it, returns the result, and the model decides the next action. The LLM never receives direct filesystem or shell access.
+
+Built-in agent tools:
+
+- `list_directory`
+- `search_files`
+- `search_text`
+- `read_file`
+- `create_file`
+- `create_directory`
+- `edit_file`
+- `replace_in_file`
+- `delete_file`
+- `move_file`
+- `run_terminal`
+- `get_errors`
+
+The agent discovers relevant files itself instead of sending the entire repository to the model. It starts with only a shallow workspace summary and tool schemas.
+
+### Agent safety
+
+- all paths are workspace-relative;
+- absolute paths and `..` traversal are rejected;
+- resolved symlinks are checked so they cannot escape the workspace;
+- Workspace Trust is required for writes and terminal commands;
+- existing files must be read before edit/move/delete;
+- hashes detect external changes before overwrite;
+- delete/move and terminal operations use approval controls;
+- each task has a configurable maximum step count;
+- backups are stored in VS Code extension storage;
+- file writes return unified diffs;
+- **Llama.cpp: Roll Back Last Agent Changes** restores the last session and detects post-agent external changes before overwriting them.
+
+The UI only shows actions such as `Procurando arquivos...`, `Lendo src/app.js...`, `Alterando src/app.js...`, `Executando comando...`, and `Tarefa concluída.`. Private model reasoning is not displayed.
+
+### Agent settings
+
+```json
+{
+  "llamaCpp.agent.enabled": true,
+  "llamaCpp.agent.maxSteps": 30,
+  "llamaCpp.agent.maxTokensPerStep": 2048,
+  "llamaCpp.agent.temperature": 0.1,
+  "llamaCpp.agent.confirmFileWrites": false,
+  "llamaCpp.agent.confirmTerminalCommands": true,
+  "llamaCpp.agent.terminalTimeoutMs": 120000
+}
+```
+
+For llama.cpp native function/tool calling, run a compatible `llama-server` configuration (current llama.cpp supports OpenAI-style tool calls, typically with Jinja chat templates enabled). The adapter also accepts llama.cpp responses where tool arguments are returned as either a JSON string or an object.
 
 ## v0.7.0 highlights
 
 - **Copilot-style Status Bar menu** for inline suggestions.
-- Status icon shows three states: enabled, disabled, or temporarily snoozed.
-- Enable/disable inline suggestions globally.
-- Enable/disable inline suggestions for the active VS Code language/file type.
-- Language overrides use `llamaCpp.autocomplete.enable`, with `"*"` as the default, similar to `github.copilot.enable`.
-- Reset a language override so it inherits the global default again.
-- Snooze inline suggestions for 5, 15, or 30 minutes without changing settings.
-- Trigger an inline suggestion, open Chat, open performance metrics, or open autocomplete settings directly from the Status Bar menu.
-- Disabled languages are checked before RAG or llama.cpp calls, so no autocomplete request is sent for those files.
+- Status icon shows enabled, disabled, or temporarily snoozed state.
+- Enable/disable inline suggestions globally or for the active VS Code language/file type.
+- `llamaCpp.autocomplete.enable` uses `"*"` as the default with language-specific overrides.
+- Snooze inline suggestions for 5, 15, or 30 minutes.
+- Disabled languages are checked before RAG or llama.cpp calls.
 
 ## Native Chat
 
 The extension integrates with VS Code's native AI surfaces.
 
 - llama.cpp models returned by `GET /v1/models` can appear in the Chat model picker.
-- Native `@llama` participant with `/explain`, `/fix`, `/review`, `/tests`, `/refactor`, and `/codebase`.
-- Native VS Code Chat context attachments.
-- Native Markdown streaming and Chat history.
+- Native `@llama` participant with `/agent`, `/explain`, `/fix`, `/review`, `/tests`, `/refactor`, and `/codebase`.
+- Native VS Code Chat context attachments, Markdown streaming, and Chat history.
 - Editor actions with diff preview before applying model-generated edits.
 
 Run:
@@ -30,28 +85,15 @@ Run:
 Llama.cpp: Open Native Chat
 ```
 
-Or use:
+Or start Agent Mode directly with:
 
 ```text
-@llama /codebase where is session validation implemented?
+Llama.cpp: Run Agent
 ```
 
 ## Inline suggestions Status Bar menu
 
-A small llama.cpp Assistant icon is shown in the VS Code Status Bar. Click it to configure autocomplete for the current editor.
-
-The menu includes:
-
-- enable/disable inline suggestions globally;
-- enable/disable the current file type/language;
-- reset the current language override;
-- snooze suggestions temporarily;
-- trigger a suggestion immediately;
-- open Chat, metrics, or settings.
-
-The active file type is resolved through the VS Code language mode. For example, a `.py` file normally uses the `python` language ID and a `.ts` file uses `typescript`.
-
-The equivalent settings JSON is:
+Click the llama.cpp Assistant icon in the VS Code Status Bar to enable/disable inline suggestions globally or for the current file type, reset a language override, snooze suggestions, trigger completion, or open Chat/settings/metrics.
 
 ```json
 {
@@ -67,13 +109,9 @@ The equivalent settings JSON is:
 }
 ```
 
-A language-specific value overrides `"*"`. The master `llamaCpp.autocomplete.enabled` switch disables all inline suggestions when set to `false`.
-
 ## Autocomplete
 
 Inline completion supports llama.cpp FIM `/infill` and OpenAI-compatible `/v1/completions`.
-
-Recommended low-latency settings:
 
 ```json
 {
@@ -86,9 +124,7 @@ Recommended low-latency settings:
 
 ## Context behavior
 
-In native Chat, use VS Code's **Add Context** control to attach files or selections explicitly.
-
-The classic chat still has its **Current file** toggle. When that toggle is off, current and other visible editor files are not automatically attached, and visible files are filtered out of automatic RAG retrieval. Explicit `@file` references still work.
+In native Chat, use VS Code's **Add Context** control to attach files or selections explicitly. The classic chat still has its **Current file** toggle; when off, current/visible files are not attached or rediscovered through automatic RAG.
 
 ## API mode
 
@@ -118,45 +154,19 @@ Use **Llama.cpp: Set API Key** to store the key in VS Code SecretStorage.
 
 The extension supports BM25, vectors, hybrid retrieval, optional reranking, persistent caching, and explicit file context.
 
-```json
-{
-  "llamaCpp.rag.enabled": true,
-  "llamaCpp.rag.strategy": "hybrid",
-  "llamaCpp.rag.embedding.enabled": true,
-  "llamaCpp.rag.embedding.baseUrl": "http://127.0.0.1:8081/v1",
-  "llamaCpp.rag.rerank.enabled": true,
-  "llamaCpp.rag.rerank.baseUrl": "http://127.0.0.1:8082/v1",
-  "llamaCpp.rag.cache.enabled": true
-}
-```
-
 ## Performance metrics
 
-The performance status item reports the latest request using values such as:
-
-```text
-Chat 720ms · P88.9 · G6.7 · C✓
-```
-
-It reports TTFT, prompt tokens/s, generation tokens/s, and prompt-cache state when the server exposes it.
-
-Use **Llama.cpp: Show Performance Metrics** for details.
+The performance status item reports TTFT, prompt tokens/s, generation tokens/s, and prompt-cache state when available.
 
 ## Development
 
-Open the repository in VS Code and press `F5` to launch an Extension Development Host.
-
-Validate JavaScript:
-
 ```bash
 npm run check
-```
-
-Package:
-
-```bash
+npm test
 npx @vscode/vsce package
 ```
+
+Open the repository in VS Code and press `F5` to launch an Extension Development Host.
 
 ## License
 
