@@ -18,6 +18,7 @@ function getConfig() {
     },
     autocomplete: {
       enabled: c.get('autocomplete.enabled', true),
+      enable: c.get('autocomplete.enable', { '*': true, plaintext: false, markdown: false, scminput: false }),
       backend: c.get('autocomplete.backend', 'auto'),
       profile: c.get('autocomplete.profile', 'fast'),
       maxTokens: c.get('autocomplete.maxTokens', 48),
@@ -75,12 +76,8 @@ function getConfig() {
         maxMegabytes: c.get('rag.cache.maxMegabytes', 128)
       }
     },
-    metrics: {
-      showStatusBar: c.get('metrics.showStatusBar', true)
-    },
-    request: {
-      timeoutMs: c.get('request.timeoutMs', 120000)
-    }
+    metrics: { showStatusBar: c.get('metrics.showStatusBar', true) },
+    request: { timeoutMs: c.get('request.timeoutMs', 120000) }
   };
 }
 
@@ -88,22 +85,16 @@ function configuredBaseUrl(config = getConfig()) {
   if (config.mode === 'local') return `http://${config.local.host}:${config.local.port}`;
   return String(config.api.baseUrl).trim().replace(/\/+$/, '');
 }
-
 function endpointFromBase(baseUrl, path) {
   const base = String(baseUrl || '').trim().replace(/\/+$/, '');
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   if (base.endsWith('/v1') && cleanPath.startsWith('/v1/')) return `${base}${cleanPath.slice(3)}`;
   return `${base}${cleanPath}`;
 }
-
-function openAiEndpoint(path, config = getConfig()) {
-  return endpointFromBase(configuredBaseUrl(config), path);
-}
-
+function openAiEndpoint(path, config = getConfig()) { return endpointFromBase(configuredBaseUrl(config), path); }
 function llamaCppEndpoint(path, config = getConfig()) {
   let base = configuredBaseUrl(config);
   if (base.endsWith('/v1')) base = base.slice(0, -3);
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
-
 module.exports = { getConfig, configuredBaseUrl, endpointFromBase, openAiEndpoint, llamaCppEndpoint };
