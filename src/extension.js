@@ -5,16 +5,22 @@ const { LlamaClient } = require('./llamaClient');
 const { LocalServerManager } = require('./localServer');
 const { PerformanceIndicator } = require('./performance');
 const { WorkspaceIndex } = require('./workspaceIndex');
+const { LlamaLanguageModelProvider, VENDOR } = require('./nativeModelProvider');
+const { registerNativeChat } = require('./nativeChat');
+const { EditorActions } = require('./editorActions');
 
 function activate(context) {
   const output = vscode.window.createOutputChannel('llama.cpp Assistant');
   const localServer = new LocalServerManager(output);
   const client = new LlamaClient(context.secrets, localServer, output);
   const workspaceIndex = new WorkspaceIndex(client, output, context.storageUri || context.globalStorageUri);
-  const chat = new ChatPanel(client, workspaceIndex, context.extensionUri);
+  const classicChat = new ChatPanel(client, workspaceIndex, context.extensionUri);
   const performance = new PerformanceIndicator(client);
+  const editorActions = new EditorActions(client, classicChat, context);
+  const nativeProvider = new LlamaLanguageModelProvider(client);
 
-  context.subscriptions.push(output, localServer, client, workspaceIndex, chat, performance);
+  context.subscriptions.push(output, localServer, client, workspaceIndex, classicChat, performance, editorActions, nativeProvider);
+
   context.subscriptions.push(
     vscode.languages.registerInlineCompletionItemProvider(
       { scheme: 'file' },
@@ -22,8 +28,15 @@ function activate(context) {
     )
   );
 
+  if (vscode.lm?.registerLanguageModelChatProvider) {
+    context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider(VENDOR, nativeProvider));
+  }
+  const nativeParticipant = registerNativeChat(context, client, workspaceIndex);
+  if (nativeParticipant) context.subscriptions.push(nativeParticipant);
+
   context.subscriptions.push(
-    vscode.commands.registerCommand('llamaCpp.openChat', () => chat.open()),
+    vscode.commands.registerCommand('llamaCpp.openChat', () => openNativeChat(classicChat)),
+    vscode.commands.registerCommand('llamaCpp.openClassicChat', () => classicChat.open()),
     vscode.commands.registerCommand('llamaCpp.askSelection', async () => {
       const editor = vscode.window.activeTextEditor;
       const hasSelection = editor && !editor.selection.isEmpty;
@@ -32,16 +45,23 @@ function activate(context) {
         prompt: hasSelection ? 'Ask a question about the selected code.' : 'Ask a question about the active file.',
         ignoreFocusOut: true
       });
-      if (prompt) chat.open(prompt, { includeActiveFile: true });
+      if (prompt) classicChat.open(prompt, { includeActiveFile: true });
     }),
-    vscode.commands.registerCommand('llamaCpp.setApiKey', () => client.setApiKey()),
-    vscode.commands.registerCommand('llamaCpp.clearApiKey', () => client.clearApiKey()),
+    vscode.commands.registerCommand('llamaCpp.inlineEdit', () => editorActions.edit('edit')),
+    vscode.commands.registerCommand('llamaCpp.fixSelection', () => editorActions.edit('fix')),
+    vscode.commands.registerCommand('llamaCpp.refactorSelection', () => editorActions.edit('refactor')),
+    vscode.commands.registerCommand('llamaCpp.reviewSelection', () => editorActions.review()),
+    vscode.commands.registerCommand('llamaCpp.generateTests', () => editorActions.tests()),
+    vscode.commands.registerCommand('llamaCpp.manageProvider', () => manageProvider(client, nativeProvider)),
+    vscode.commands.registerCommand('llamaCpp.setApiKey', async () => { await client.setApiKey(); nativeProvider.refresh(); }),
+    vscode.commands.registerCommand('llamaCpp.clearApiKey', async () => { await client.clearApiKey(); nativeProvider.refresh(); }),
     vscode.commands.registerCommand('llamaCpp.setRagApiKey', () => client.setRagApiKey()),
     vscode.commands.registerCommand('llamaCpp.clearRagApiKey', () => client.clearRagApiKey()),
     vscode.commands.registerCommand('llamaCpp.showPerformanceMetrics', () => performance.showDetails()),
     vscode.commands.registerCommand('llamaCpp.testConnection', async () => {
       try {
         const models = await client.testConnection();
+        nativeProvider.refresh();
         const suffix = models.length ? ` Models: ${models.join(', ')}` : '';
         vscode.window.showInformationMessage(`llama.cpp Assistant: connection OK.${suffix}`);
       } catch (error) {
@@ -75,7 +95,33 @@ function activate(context) {
 
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
     if (event.affectsConfiguration('llamaCpp.metrics.showStatusBar')) performance.refreshVisibility();
+    if (event.affectsConfiguration('llamaCpp.api') || event.affectsConfiguration('llamaCpp.mode') || event.affectsConfiguration('llamaCpp.local')) nativeProvider.refresh();
   }));
+}
+
+async function openNativeChat(classicChat) {
+  try {
+    const commands = await vscode.commands.getCommands(true);
+    if (commands.includes('workbench.action.chat.open')) {
+      await vscode.commands.executeCommand('workbench.action.chat.open', { query: '@llama ', isPartialQuery: true });
+      return;
+    }
+  } catch { /* fallback below */ }
+  classicChat.open();
+}
+
+async function manageProvider(client, nativeProvider) {
+  const choice = await vscode.window.showQuickPick([
+    { label: '$(key) Set API key', value: 'key' },
+    { label: '$(plug) Test connection and refresh models', value: 'test' },
+    { label: '$(settings-gear) Open llama.cpp Assistant settings', value: 'settings' },
+    { label: '$(comment-discussion) Open native Chat', value: 'chat' }
+  ], { title: 'llama.cpp model provider' });
+  if (!choice) return;
+  if (choice.value === 'key') { await client.setApiKey(); nativeProvider.refresh(); }
+  else if (choice.value === 'test') { await client.testConnection(); nativeProvider.refresh(); vscode.window.showInformationMessage('llama.cpp models refreshed.'); }
+  else if (choice.value === 'settings') await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:local.llama-cpp-assistant');
+  else if (choice.value === 'chat') await openNativeChat({ open() {} });
 }
 
 function deactivate() {}
