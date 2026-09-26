@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   package:
     runs-on: ubuntu-latest
@@ -13,9 +16,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Read extension version
+        id: version
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
       - run: npm install -g @vscode/vsce
-      - run: vsce package --out llama-cpp-assistant-${{ github.sha }}.vsix
+      - run: npm run check
+      - name: Package VSIX
+        run: vsce package --out llama-cpp-assistant-${{ steps.version.outputs.version }}.vsix
       - uses: actions/upload-artifact@v4
         with:
-          name: llama-cpp-assistant-vsix
+          name: llama-cpp-assistant-${{ steps.version.outputs.version }}
           path: '*.vsix'
+      - name: Create GitHub Release
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" *.vsix --clobber
+          else
+            gh release create "$TAG" *.vsix --title "$TAG" --generate-notes --target "$GITHUB_SHA"
+          fi
