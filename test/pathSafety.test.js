@@ -1,0 +1,4 @@
+const test=require('node:test');const assert=require('node:assert/strict');const path=require('node:path');const{normalizeRelativePath,resolveInsideRoot,isInsideRoot}=require('../src/workspace/pathSafety');
+test('normalizes safe relative paths',()=>{assert.equal(normalizeRelativePath('src/example.js'),path.join('src','example.js'));assert.equal(resolveInsideRoot('/tmp/project','src/a.js').absolute,path.resolve('/tmp/project/src/a.js'));});
+test('rejects path traversal and absolute paths',()=>{assert.throws(()=>normalizeRelativePath('../secret'),/traversal/i);assert.throws(()=>normalizeRelativePath('..%2Fsecret'),/traversal/i);assert.throws(()=>normalizeRelativePath('/etc/passwd'),/absolute/i);assert.throws(()=>normalizeRelativePath('C:\\Windows\\system.ini'),/absolute/i);});
+test('checks root containment',()=>{assert.equal(isInsideRoot('/tmp/project','/tmp/project/src/a'),true);assert.equal(isInsideRoot('/tmp/project','/tmp/project2/a'),false);});
