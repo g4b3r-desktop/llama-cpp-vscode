@@ -2,7 +2,7 @@ function assertWorkspaceScopedCommand(command) {
   const text = String(command || '').trim();
   if (!text) throw new Error('Terminal command is empty.');
   const forbidden = [
-    { pattern: /(^|[\\/])\.\.([\\/]|$)/, reason: 'parent-directory traversal is not allowed' },
+    { pattern: /(^|[\s"'=\\/])\.\.([\\/\s]|$)/, reason: 'parent-directory traversal is not allowed' },
     { pattern: /(^|[\s"'=])\/[A-Za-z0-9._-]/, reason: 'absolute POSIX paths are not allowed' },
     { pattern: /(^|[\s"'=])[A-Za-z]:[\\/]/, reason: 'absolute Windows paths are not allowed' },
     { pattern: /(^|[\s"'=])\\\\[^\\]/, reason: 'UNC paths are not allowed' },
