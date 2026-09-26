@@ -1,0 +1,21 @@
+name: Package VSIX
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install -g @vscode/vsce
+      - run: vsce package --out llama-cpp-assistant-${{ github.sha }}.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llama-cpp-assistant-vsix
+          path: '*.vsix'
