@@ -1,46 +1,42 @@
 {
   "name": "llama-cpp-assistant",
   "displayName": "llama.cpp Assistant",
-  "description": "Copilot-like VS Code experience for local or remote llama.cpp: native Chat integration, status-bar controls, per-language inline suggestions, code actions, autocomplete, RAG and performance metrics.",
-  "version": "0.7.0",
+  "description": "Copilot-like VS Code experience for local or remote llama.cpp: native Chat, autonomous agent tools, status-bar controls, per-language inline suggestions, RAG and performance metrics.",
+  "version": "0.8.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {"vscode": "^1.117.0"},
   "categories": ["Machine Learning", "Other"],
-  "keywords": ["AI", "FIM", "RAG", "autocomplete", "chat participant", "llama", "llama.cpp", "local LLM", "native chat", "inline edit", "inline suggestions", "status bar", "Copilot alternative", "Markdown", "TTFT"],
+  "keywords": ["AI", "agent", "agent mode", "tools", "FIM", "RAG", "autocomplete", "chat participant", "llama", "llama.cpp", "local LLM", "native chat", "inline edit", "inline suggestions", "Copilot alternative", "rollback"],
   "activationEvents": ["onStartupFinished"],
   "main": "./src/extension.js",
   "scripts": {
-    "check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check src/inlineSuggestionsController.js && node --check media/chat.js",
+    "check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check src/inlineSuggestionsController.js && node --check src/agent/AgentController.js && node --check src/agent/AgentRunner.js && node --check src/tools/ToolRegistry.js && node --check src/tools/registerCoreTools.js && node --check src/workspace/pathSafety.js && node --check src/workspace/diff.js && node --check src/workspace/WorkspaceService.js && node --check src/terminal/TerminalService.js && node --check src/permissions/PermissionService.js && node --check src/history/AgentHistory.js && node --check src/llm/AgentModel.js && node --check src/llm/LlamaAgentModel.js && node --check media/chat.js",
+    "test": "node --test test/*.test.js",
     "package": "npx @vscode/vsce package"
   },
   "contributes": {
-    "languageModelChatProviders": [
-      {
-        "vendor": "g4b3r-llamacpp",
-        "displayName": "llama.cpp",
-        "managementCommand": "llamaCpp.manageProvider"
-      }
-    ],
-    "chatParticipants": [
-      {
-        "id": "llama-cpp-assistant.llama",
-        "name": "llama",
-        "fullName": "llama.cpp Assistant",
-        "description": "Ask your local or remote llama.cpp model about code",
-        "isSticky": true,
-        "commands": [
-          {"name": "explain", "description": "Explain selected or attached code"},
-          {"name": "fix", "description": "Find a bug and propose a focused fix"},
-          {"name": "review", "description": "Review code for correctness, security and maintainability"},
-          {"name": "tests", "description": "Generate focused tests"},
-          {"name": "refactor", "description": "Suggest a behavior-preserving refactor"},
-          {"name": "codebase", "description": "Answer using workspace RAG context"}
-        ]
-      }
-    ],
+    "languageModelChatProviders": [{"vendor": "g4b3r-llamacpp", "displayName": "llama.cpp", "managementCommand": "llamaCpp.manageProvider"}],
+    "chatParticipants": [{
+      "id": "llama-cpp-assistant.llama",
+      "name": "llama",
+      "fullName": "llama.cpp Assistant",
+      "description": "Ask or run an autonomous local llama.cpp coding agent",
+      "isSticky": true,
+      "commands": [
+        {"name": "agent", "description": "Run an autonomous workspace agent with controlled file, search, diagnostics and terminal tools"},
+        {"name": "explain", "description": "Explain selected or attached code"},
+        {"name": "fix", "description": "Find a bug and propose a focused fix"},
+        {"name": "review", "description": "Review code for correctness, security and maintainability"},
+        {"name": "tests", "description": "Generate focused tests"},
+        {"name": "refactor", "description": "Suggest a behavior-preserving refactor"},
+        {"name": "codebase", "description": "Answer using workspace RAG context"}
+      ]
+    }],
     "commands": [
       {"command": "llamaCpp.openChat", "title": "Llama.cpp: Open Native Chat", "icon": "$(comment-discussion)"},
+      {"command": "llamaCpp.runAgent", "title": "Llama.cpp: Run Agent", "icon": "$(tools)"},
+      {"command": "llamaCpp.rollbackAgent", "title": "Llama.cpp: Roll Back Last Agent Changes"},
       {"command": "llamaCpp.openClassicChat", "title": "Llama.cpp: Open Classic Chat"},
       {"command": "llamaCpp.openInlineStatusMenu", "title": "Llama.cpp: Configure Inline Suggestions"},
       {"command": "llamaCpp.askSelection", "title": "Llama.cpp: Ask About Selection", "icon": "$(sparkle)"},
@@ -60,24 +56,19 @@
       {"command": "llamaCpp.clearRagApiKey", "title": "Llama.cpp: Clear RAG API Key"},
       {"command": "llamaCpp.showPerformanceMetrics", "title": "Llama.cpp: Show Performance Metrics"}
     ],
-    "submenus": [
-      {"id": "llamaCpp.editorActions", "label": "llama.cpp Assistant"}
-    ],
+    "submenus": [{"id": "llamaCpp.editorActions", "label": "llama.cpp Assistant"}],
     "menus": {
-      "editor/context": [
-        {"submenu": "llamaCpp.editorActions", "when": "editorTextFocus", "group": "navigation@100"}
-      ],
+      "editor/context": [{"submenu": "llamaCpp.editorActions", "when": "editorTextFocus", "group": "navigation@100"}],
       "llamaCpp.editorActions": [
         {"command": "llamaCpp.inlineEdit", "group": "1_edit@1"},
         {"command": "llamaCpp.fixSelection", "group": "1_edit@2"},
         {"command": "llamaCpp.refactorSelection", "group": "1_edit@3"},
         {"command": "llamaCpp.askSelection", "group": "2_chat@1"},
         {"command": "llamaCpp.reviewSelection", "group": "2_chat@2"},
-        {"command": "llamaCpp.generateTests", "group": "2_chat@3"}
+        {"command": "llamaCpp.generateTests", "group": "2_chat@3"},
+        {"command": "llamaCpp.runAgent", "group": "3_agent@1"}
       ],
-      "editor/title": [
-        {"command": "llamaCpp.openChat", "group": "navigation@100", "when": "editorTextFocus"}
-      ]
+      "editor/title": [{"command": "llamaCpp.openChat", "group": "navigation@100", "when": "editorTextFocus"}]
     },
     "configuration": {
       "title": "llama.cpp Assistant",
@@ -91,15 +82,19 @@
         "llamaCpp.local.args": {"type": "array", "items": {"type": "string"}, "default": []},
         "llamaCpp.api.baseUrl": {"type": "string", "default": "http://127.0.0.1:8080"},
         "llamaCpp.api.model": {"type": "string", "default": "", "description": "Default model. Native VS Code Chat can choose among models returned by /v1/models."},
+        "llamaCpp.agent.enabled": {"type": "boolean", "default": true, "description": "Enable the autonomous controlled-tool agent exposed as @llama /agent."},
+        "llamaCpp.agent.maxSteps": {"type": "number", "default": 30, "minimum": 1, "maximum": 100, "description": "Maximum LLM/tool iterations per agent task."},
+        "llamaCpp.agent.maxTokensPerStep": {"type": "number", "default": 2048, "minimum": 64},
+        "llamaCpp.agent.temperature": {"type": "number", "default": 0.1, "minimum": 0, "maximum": 2},
+        "llamaCpp.agent.confirmFileWrites": {"type": "boolean", "default": false, "description": "Ask before normal file create/edit operations. Delete and move always require approval."},
+        "llamaCpp.agent.confirmTerminalCommands": {"type": "boolean", "default": true, "description": "Ask before terminal commands. Dangerous commands always require approval even if disabled."},
+        "llamaCpp.agent.terminalTimeoutMs": {"type": "number", "default": 120000, "minimum": 1000},
+        "llamaCpp.agent.maxTerminalOutputCharacters": {"type": "number", "default": 40000, "minimum": 1000},
+        "llamaCpp.agent.maxToolResultCharacters": {"type": "number", "default": 16000, "minimum": 1000},
         "llamaCpp.autocomplete.enabled": {"type": "boolean", "default": true, "description": "Master switch for llama.cpp inline suggestions."},
-        "llamaCpp.autocomplete.enable": {
-          "type": "object",
-          "default": {"*": true, "plaintext": false, "markdown": false, "scminput": false},
-          "additionalProperties": {"type": "boolean"},
-          "description": "Enable or disable inline suggestions by VS Code language ID. '*' is the default. Language-specific entries override '*', similar to github.copilot.enable."
-        },
+        "llamaCpp.autocomplete.enable": {"type": "object", "default": {"*": true, "plaintext": false, "markdown": false, "scminput": false}, "additionalProperties": {"type": "boolean"}, "description": "Enable or disable inline suggestions by VS Code language ID. '*' is the default."},
         "llamaCpp.autocomplete.backend": {"type": "string", "enum": ["auto", "fim", "openai"], "default": "auto"},
-        "llamaCpp.autocomplete.profile": {"type": "string", "enum": ["fast", "balanced", "quality"], "default": "fast", "description": "Latency profile. Fast and balanced use only an already-loaded local BM25 index for related files; quality can use the full configured RAG pipeline."},
+        "llamaCpp.autocomplete.profile": {"type": "string", "enum": ["fast", "balanced", "quality"], "default": "fast"},
         "llamaCpp.autocomplete.maxTokens": {"type": "number", "default": 48},
         "llamaCpp.autocomplete.temperature": {"type": "number", "default": 0.1},
         "llamaCpp.autocomplete.contextLinesBefore": {"type": "number", "default": 40},
@@ -114,7 +109,7 @@
         "llamaCpp.chat.maxTokens": {"type": "number", "default": 1024},
         "llamaCpp.chat.temperature": {"type": "number", "default": 0.3},
         "llamaCpp.chat.streaming": {"type": "boolean", "default": true},
-        "llamaCpp.chat.includeEditorContext": {"type": "boolean", "default": true, "description": "Default automatic editor context. Native Chat attachments always remain explicit."},
+        "llamaCpp.chat.includeEditorContext": {"type": "boolean", "default": true},
         "llamaCpp.chat.maxContextCharacters": {"type": "number", "default": 24000},
         "llamaCpp.chat.includeVisibleEditors": {"type": "boolean", "default": true},
         "llamaCpp.chat.maxVisibleFiles": {"type": "number", "default": 4},
