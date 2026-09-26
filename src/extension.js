@@ -8,6 +8,7 @@ const { WorkspaceIndex } = require('./workspaceIndex');
 const { LlamaLanguageModelProvider, VENDOR } = require('./nativeModelProvider');
 const { registerNativeChat } = require('./nativeChat');
 const { EditorActions } = require('./editorActions');
+const { InlineSuggestionsController } = require('./inlineSuggestionsController');
 
 function activate(context) {
   const output = vscode.window.createOutputChannel('llama.cpp Assistant');
@@ -18,13 +19,14 @@ function activate(context) {
   const performance = new PerformanceIndicator(client);
   const editorActions = new EditorActions(client, classicChat, context);
   const nativeProvider = new LlamaLanguageModelProvider(client);
+  const inlineSuggestions = new InlineSuggestionsController(context);
 
-  context.subscriptions.push(output, localServer, client, workspaceIndex, classicChat, performance, editorActions, nativeProvider);
+  context.subscriptions.push(output, localServer, client, workspaceIndex, classicChat, performance, editorActions, nativeProvider, inlineSuggestions);
 
   context.subscriptions.push(
     vscode.languages.registerInlineCompletionItemProvider(
       { scheme: 'file' },
-      new LlamaInlineCompletionProvider(client, workspaceIndex)
+      new LlamaInlineCompletionProvider(client, workspaceIndex, inlineSuggestions)
     )
   );
 
@@ -37,6 +39,7 @@ function activate(context) {
   context.subscriptions.push(
     vscode.commands.registerCommand('llamaCpp.openChat', () => openNativeChat(classicChat)),
     vscode.commands.registerCommand('llamaCpp.openClassicChat', () => classicChat.open()),
+    vscode.commands.registerCommand('llamaCpp.openInlineStatusMenu', () => inlineSuggestions.openMenu()),
     vscode.commands.registerCommand('llamaCpp.askSelection', async () => {
       const editor = vscode.window.activeTextEditor;
       const hasSelection = editor && !editor.selection.isEmpty;
@@ -71,9 +74,7 @@ function activate(context) {
         if (choice === 'Show Output') output.show(true);
       }
     }),
-    vscode.commands.registerCommand('llamaCpp.triggerCompletion', () =>
-      vscode.commands.executeCommand('editor.action.inlineSuggest.trigger')
-    ),
+    vscode.commands.registerCommand('llamaCpp.triggerCompletion', () => vscode.commands.executeCommand('editor.action.inlineSuggest.trigger')),
     vscode.commands.registerCommand('llamaCpp.reindexWorkspace', async () => {
       try {
         const result = await workspaceIndex.reindex(true);
@@ -125,5 +126,4 @@ async function manageProvider(client, nativeProvider) {
 }
 
 function deactivate() {}
-
 module.exports = { activate, deactivate };
