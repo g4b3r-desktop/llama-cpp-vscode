@@ -21,6 +21,7 @@ jobs:
         run: node -e "console.log('version=' + require('./package.json').version)" >> "$GITHUB_OUTPUT"
       - run: npm install -g @vscode/vsce
       - run: npm run check
+      - run: npm test
       - name: Package VSIX
         run: vsce package --out llama-cpp-assistant-${{ steps.version.outputs.version }}.vsix
       - uses: actions/upload-artifact@v4
