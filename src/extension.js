@@ -3,6 +3,7 @@ const { LlamaInlineCompletionProvider } = require('./autocomplete');
 const { ChatPanel } = require('./chatPanel');
 const { LlamaClient } = require('./llamaClient');
 const { LocalServerManager } = require('./localServer');
+const { PerformanceIndicator } = require('./performance');
 const { WorkspaceIndex } = require('./workspaceIndex');
 
 function activate(context) {
@@ -11,8 +12,9 @@ function activate(context) {
   const client = new LlamaClient(context.secrets, localServer, output);
   const workspaceIndex = new WorkspaceIndex(client, output, context.storageUri || context.globalStorageUri);
   const chat = new ChatPanel(client, workspaceIndex, context.extensionUri);
+  const performance = new PerformanceIndicator(client);
 
-  context.subscriptions.push(output, localServer, workspaceIndex, chat);
+  context.subscriptions.push(output, localServer, client, workspaceIndex, chat, performance);
   context.subscriptions.push(
     vscode.languages.registerInlineCompletionItemProvider(
       { scheme: 'file' },
@@ -36,6 +38,7 @@ function activate(context) {
     vscode.commands.registerCommand('llamaCpp.clearApiKey', () => client.clearApiKey()),
     vscode.commands.registerCommand('llamaCpp.setRagApiKey', () => client.setRagApiKey()),
     vscode.commands.registerCommand('llamaCpp.clearRagApiKey', () => client.clearRagApiKey()),
+    vscode.commands.registerCommand('llamaCpp.showPerformanceMetrics', () => performance.showDetails()),
     vscode.commands.registerCommand('llamaCpp.testConnection', async () => {
       try {
         const models = await client.testConnection();
@@ -69,6 +72,10 @@ function activate(context) {
       );
     })
   );
+
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+    if (event.affectsConfiguration('llamaCpp.metrics.showStatusBar')) performance.refreshVisibility();
+  }));
 }
 
 function deactivate() {}
