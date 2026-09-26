@@ -1,37 +1,28 @@
 # llama.cpp Assistant for VS Code
 
-A VS Code extension that turns a local or remote `llama.cpp` server into a coding assistant with native VS Code Chat integration, inline autocomplete, code actions, RAG, Markdown streaming, and performance metrics.
+A VS Code extension that turns a local or remote `llama.cpp` server into a coding assistant with native VS Code Chat integration, inline autocomplete, code actions, RAG, Markdown streaming, performance metrics, and Copilot-style inline suggestion controls.
 
-## v0.6.0 highlights
+## v0.7.0 highlights
 
-The extension now integrates with VS Code's native AI surfaces instead of relying only on its custom Webview chat.
-
-- **Native VS Code Chat model provider**: models returned by `GET /v1/models` can appear in the Chat model picker under **llama.cpp**.
-- **Native `@llama` chat assistant** with slash commands:
-  - `/explain`
-  - `/fix`
-  - `/review`
-  - `/tests`
-  - `/refactor`
-  - `/codebase`
-- **Native Chat context attachments**: file and selection references attached with VS Code's context picker are read and sent to llama.cpp.
-- **Native Chat history and Markdown streaming** through the VS Code Chat UI.
-- **Editor AI actions** in the editor context menu:
-  - Inline Edit
-  - Fix Selection
-  - Refactor Selection
-  - Ask About Selection
-  - Review Selection
-  - Generate Tests
-- **Diff preview before applying edits**.
-- Existing FIM autocomplete, hybrid RAG, embeddings, reranking, performance metrics, SecretStorage keys, and classic chat remain available.
-
-## Requirements
-
-- VS Code 1.117 or newer.
-- A `llama-server` installed locally, **or** an OpenAI-compatible remote API.
+- **Copilot-style Status Bar menu** for inline suggestions.
+- Status icon shows three states: enabled, disabled, or temporarily snoozed.
+- Enable/disable inline suggestions globally.
+- Enable/disable inline suggestions for the active VS Code language/file type.
+- Language overrides use `llamaCpp.autocomplete.enable`, with `"*"` as the default, similar to `github.copilot.enable`.
+- Reset a language override so it inherits the global default again.
+- Snooze inline suggestions for 5, 15, or 30 minutes without changing settings.
+- Trigger an inline suggestion, open Chat, open performance metrics, or open autocomplete settings directly from the Status Bar menu.
+- Disabled languages are checked before RAG or llama.cpp calls, so no autocomplete request is sent for those files.
 
 ## Native Chat
+
+The extension integrates with VS Code's native AI surfaces.
+
+- llama.cpp models returned by `GET /v1/models` can appear in the Chat model picker.
+- Native `@llama` participant with `/explain`, `/fix`, `/review`, `/tests`, `/refactor`, and `/codebase`.
+- Native VS Code Chat context attachments.
+- Native Markdown streaming and Chat history.
+- Editor actions with diff preview before applying model-generated edits.
 
 Run:
 
@@ -39,43 +30,44 @@ Run:
 Llama.cpp: Open Native Chat
 ```
 
-The command opens VS Code Chat and pre-fills `@llama` when supported by the host.
-
-You can also open Chat normally and type:
-
-```text
-@llama explain this project
-```
-
-Use slash commands for common workflows:
-
-```text
-@llama /review review the authentication flow
-```
+Or use:
 
 ```text
 @llama /codebase where is session validation implemented?
 ```
 
-### Model picker
+## Inline suggestions Status Bar menu
 
-The extension contributes a **llama.cpp** model provider to VS Code. It discovers models from:
+A small llama.cpp Assistant icon is shown in the VS Code Status Bar. Click it to configure autocomplete for the current editor.
 
-```text
-GET /v1/models
+The menu includes:
+
+- enable/disable inline suggestions globally;
+- enable/disable the current file type/language;
+- reset the current language override;
+- snooze suggestions temporarily;
+- trigger a suggestion immediately;
+- open Chat, metrics, or settings.
+
+The active file type is resolved through the VS Code language mode. For example, a `.py` file normally uses the `python` language ID and a `.ts` file uses `typescript`.
+
+The equivalent settings JSON is:
+
+```json
+{
+  "llamaCpp.autocomplete.enabled": true,
+  "llamaCpp.autocomplete.enable": {
+    "*": true,
+    "plaintext": false,
+    "markdown": false,
+    "python": true,
+    "typescript": true,
+    "yaml": false
+  }
+}
 ```
 
-Select one of the llama.cpp models in VS Code's Chat model picker. `llamaCpp.api.model` remains the default/fallback model.
-
-## Context behavior
-
-In native Chat, use VS Code's **Add Context** control to attach files or selections explicitly. The `@llama` participant reads supported file/selection references and sends their content to llama.cpp.
-
-The classic chat still has its **Current file** toggle. When that toggle is off, current and other visible editor files are not automatically attached, and visible files are filtered out of automatic RAG retrieval. Explicit `@file` references still work.
-
-## Inline editing and smart actions
-
-Right-click code and open **llama.cpp Assistant**. Edit-producing actions generate a proposal and open a VS Code diff before offering **Apply**.
+A language-specific value overrides `"*"`. The master `llamaCpp.autocomplete.enabled` switch disables all inline suggestions when set to `false`.
 
 ## Autocomplete
 
@@ -91,6 +83,12 @@ Recommended low-latency settings:
   "llamaCpp.autocomplete.relatedFilesTopK": 1
 }
 ```
+
+## Context behavior
+
+In native Chat, use VS Code's **Add Context** control to attach files or selections explicitly.
+
+The classic chat still has its **Current file** toggle. When that toggle is off, current and other visible editor files are not automatically attached, and visible files are filtered out of automatic RAG retrieval. Explicit `@file` references still work.
 
 ## API mode
 
@@ -134,16 +132,13 @@ The extension supports BM25, vectors, hybrid retrieval, optional reranking, pers
 
 ## Performance metrics
 
-The status bar reports the latest request using values such as:
+The performance status item reports the latest request using values such as:
 
 ```text
 Chat 720ms · P88.9 · G6.7 · C✓
 ```
 
-- TTFT (time to first token)
-- prompt tokens/s
-- generation tokens/s
-- prompt-cache hit state when the server reports it
+It reports TTFT, prompt tokens/s, generation tokens/s, and prompt-cache state when the server exposes it.
 
 Use **Llama.cpp: Show Performance Metrics** for details.
 
