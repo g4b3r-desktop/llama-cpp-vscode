@@ -27,12 +27,16 @@ class LlamaClient {
     vscode.window.showInformationMessage(`llama.cpp Assistant: ${success}`);
   }
 
-  async testConnection() {
+  async listModels(signal) {
     await this.ensureReady();
     const config = getConfig();
-    const data = await requestJson(openAiEndpoint('/v1/models', config), { method: 'GET', headers: await this.headers() }, config.request.timeoutMs);
-    return (data?.data || []).map(x => x.id).filter(Boolean);
+    const data = await requestJson(openAiEndpoint('/v1/models', config), { method: 'GET', headers: await this.headers() }, config.request.timeoutMs, signal);
+    const discovered = (data?.data || []).map(x => x?.id).filter(Boolean);
+    const configured = String(config.api.model || '').trim();
+    return [...new Set([configured, ...discovered].filter(Boolean))];
   }
+
+  async testConnection() { return this.listModels(); }
 
   async complete(prefix, suffix, languageId, signal, extraFiles = [], options = {}) {
     await this.ensureReady();
@@ -56,7 +60,8 @@ class LlamaClient {
         timings_per_token: true
       };
       if (maxPredictMs > 0) body.t_max_predict_ms = maxPredictMs;
-      if (String(config.api.model).trim()) body.model = String(config.api.model).trim();
+      const selectedModel = String(options.model || config.api.model || '').trim();
+      if (selectedModel) body.model = selectedModel;
       data = await requestJson(llamaCppEndpoint('/infill', config), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, config.request.timeoutMs, signal);
       this.emitMetrics('autocomplete', startedAt, Date.now(), data);
       return cleanCompletion(data?.content || data?.choices?.[0]?.text || '');
@@ -66,26 +71,27 @@ class LlamaClient {
     const prompt = [`You are a code completion engine for ${languageId}.`, 'Return only the exact code that should be inserted at <CURSOR>.', 'Do not use Markdown fences and do not explain.', ...repositoryContext, '', prefix, '<CURSOR>', suffix].join('\n');
     const body = { prompt, max_tokens: maxTokens, temperature: config.autocomplete.temperature, stream: false, stop: ['<CURSOR>', '\n\n\n'] };
     if (config.mode === 'local') body.cache_prompt = true;
-    if (String(config.api.model).trim()) body.model = String(config.api.model).trim();
+    const selectedModel = String(options.model || config.api.model || '').trim();
+    if (selectedModel) body.model = selectedModel;
     data = await requestJson(openAiEndpoint('/v1/completions', config), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, config.request.timeoutMs, signal);
     this.emitMetrics('autocomplete', startedAt, Date.now(), data);
     return cleanCompletion(data?.choices?.[0]?.text || data?.content || '');
   }
 
-  async chat(messages, signal) {
+  async chat(messages, signal, options = {}) {
     await this.ensureReady();
     const config = getConfig();
     const startedAt = Date.now();
-    const body = this.chatBody(messages, false, config);
+    const body = this.chatBody(messages, false, config, options);
     const data = await requestJson(openAiEndpoint('/v1/chat/completions', config), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, config.request.timeoutMs, signal);
     this.emitMetrics('chat', startedAt, Date.now(), data);
     return extractFullChatContent(data);
   }
 
-  async chatStream(messages, signal, onDelta) {
+  async chatStream(messages, signal, onDelta, options = {}) {
     await this.ensureReady();
     const config = getConfig();
-    const body = this.chatBody(messages, true, config);
+    const body = this.chatBody(messages, true, config, options);
     const startedAt = Date.now();
     let firstTokenAt;
     let full = '';
@@ -112,11 +118,12 @@ class LlamaClient {
     return full.trim();
   }
 
-  chatBody(messages, stream, config) {
-    const body = { messages, max_tokens: config.chat.maxTokens, temperature: config.chat.temperature, stream };
+  chatBody(messages, stream, config, options = {}) {
+    const body = { messages, max_tokens: options.maxTokens || config.chat.maxTokens, temperature: options.temperature ?? config.chat.temperature, stream };
     if (stream) body.stream_options = { include_usage: true };
     if (config.mode === 'local') body.cache_prompt = true;
-    if (String(config.api.model).trim()) body.model = String(config.api.model).trim();
+    const selectedModel = String(options.model || config.api.model || '').trim();
+    if (selectedModel) body.model = selectedModel;
     return body;
   }
 
