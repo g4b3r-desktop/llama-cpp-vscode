@@ -1,11 +1,11 @@
 const { spawn } = require('child_process');
 const { getConfig } = require('../config');
+const { assertWorkspaceScopedCommand, isDangerousCommand } = require('./commandPolicy');
 
 class TerminalService {
   constructor(rootPath, permissions, output) { this.rootPath = rootPath; this.permissions = permissions; this.output = output; }
   async run(command, signal) {
-    const text = String(command || '').trim();
-    if (!text) throw new Error('Terminal command is empty.');
+    const text = assertWorkspaceScopedCommand(command);
     const dangerous = isDangerousCommand(text);
     await this.permissions.confirmTerminal(text, dangerous);
     const config = getConfig();
@@ -18,13 +18,7 @@ class TerminalService {
       const append = (target, chunk) => { const next = target + String(chunk); return next.length > maxChars ? next.slice(next.length - maxChars) : next; };
       child.stdout?.on('data', chunk => { stdout = append(stdout, chunk); });
       child.stderr?.on('data', chunk => { stderr = append(stderr, chunk); });
-      const finish = (value, error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        signal?.removeEventListener?.('abort', onAbort);
-        if (error) reject(error); else resolve(value);
-      };
+      const finish = (value, error) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener?.('abort', onAbort); if (error) reject(error); else resolve(value); };
       const onAbort = () => { child.kill(); finish(undefined, new Error('Terminal command cancelled.')); };
       signal?.addEventListener?.('abort', onAbort, { once: true });
       const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
@@ -33,7 +27,4 @@ class TerminalService {
     });
   }
 }
-function isDangerousCommand(command) {
-  return [/(^|\s)(sudo|su)(\s|$)/i,/\brm\s+-[^\n]*r/i,/\b(del|erase|rmdir|rd)\b/i,/\bgit\s+(reset\s+--hard|clean\s+-|checkout\s+--|restore\s+--source)/i,/\b(chmod|chown|mkfs|diskpart|format)\b/i,/\b(curl|wget)\b[^\n|]*(\||;|&&)\s*(sh|bash|zsh|powershell|pwsh)\b/i,/\b(npm|pnpm|yarn|pip|pip3|cargo|gem|composer)\s+(install|add|remove|uninstall)\b/i,/(^|[^>])>{1,2}\s*[^&]/].some(pattern => pattern.test(command));
-}
-module.exports = { TerminalService, isDangerousCommand };
+module.exports = { TerminalService };
