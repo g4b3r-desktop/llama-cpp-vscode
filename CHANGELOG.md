@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0
+- Added autonomous local Agent Mode via `@llama /agent` and **Llama.cpp: Run Agent**.
+- Added a provider-agnostic `AgentModel` interface and llama.cpp tool-calling adapter.
+- Added `ToolRegistry` with controlled tools for listing/searching/reading files, creating/editing/replacing/moving/deleting files, running terminal commands, and collecting VS Code diagnostics.
+- Added workspace path guards that reject absolute paths, traversal, and symlink escapes.
+- Existing files must be read before modification; SHA-256 hashes detect external changes before overwrite.
+- Added Workspace Trust checks and confirmation controls for file/terminal operations.
+- Added persistent per-session backups, unified diffs, and **Llama.cpp: Roll Back Last Agent Changes**.
+- Added step limits, terminal timeout/output limits, and bounded tool-result context.
+- Added progress events for the native Chat UI without exposing private model reasoning.
+- Added unit tests for path safety, ToolRegistry validation/execution, and diff generation.
+- GitHub Actions now runs both `npm run check` and `npm test` before packaging or publishing a release.
+
 ## 0.7.0
 - Added a Copilot-style llama.cpp Assistant Status Bar menu for inline suggestion controls.
 - Added enabled, disabled, and snoozed Status Bar states.
