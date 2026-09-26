@@ -1,17 +1,17 @@
 {
   "name": "llama-cpp-assistant",
   "displayName": "llama.cpp Assistant",
-  "description": "Copilot-like VS Code experience for local or remote llama.cpp: native Chat integration, model picker, slash commands, inline edits, autocomplete, RAG and performance metrics.",
-  "version": "0.6.0",
+  "description": "Copilot-like VS Code experience for local or remote llama.cpp: native Chat integration, status-bar controls, per-language inline suggestions, code actions, autocomplete, RAG and performance metrics.",
+  "version": "0.7.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {"vscode": "^1.117.0"},
   "categories": ["Machine Learning", "Other"],
-  "keywords": ["AI", "FIM", "RAG", "autocomplete", "chat participant", "llama", "llama.cpp", "local LLM", "native chat", "inline edit", "Copilot alternative", "Markdown", "TTFT"],
+  "keywords": ["AI", "FIM", "RAG", "autocomplete", "chat participant", "llama", "llama.cpp", "local LLM", "native chat", "inline edit", "inline suggestions", "status bar", "Copilot alternative", "Markdown", "TTFT"],
   "activationEvents": ["onStartupFinished"],
   "main": "./src/extension.js",
   "scripts": {
-    "check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check media/chat.js",
+    "check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check src/inlineSuggestionsController.js && node --check media/chat.js",
     "package": "npx @vscode/vsce package"
   },
   "contributes": {
@@ -42,6 +42,7 @@
     "commands": [
       {"command": "llamaCpp.openChat", "title": "Llama.cpp: Open Native Chat", "icon": "$(comment-discussion)"},
       {"command": "llamaCpp.openClassicChat", "title": "Llama.cpp: Open Classic Chat"},
+      {"command": "llamaCpp.openInlineStatusMenu", "title": "Llama.cpp: Configure Inline Suggestions"},
       {"command": "llamaCpp.askSelection", "title": "Llama.cpp: Ask About Selection", "icon": "$(sparkle)"},
       {"command": "llamaCpp.inlineEdit", "title": "Llama.cpp: Inline Edit", "icon": "$(edit)"},
       {"command": "llamaCpp.fixSelection", "title": "Llama.cpp: Fix Selection"},
@@ -90,7 +91,13 @@
         "llamaCpp.local.args": {"type": "array", "items": {"type": "string"}, "default": []},
         "llamaCpp.api.baseUrl": {"type": "string", "default": "http://127.0.0.1:8080"},
         "llamaCpp.api.model": {"type": "string", "default": "", "description": "Default model. Native VS Code Chat can choose among models returned by /v1/models."},
-        "llamaCpp.autocomplete.enabled": {"type": "boolean", "default": true},
+        "llamaCpp.autocomplete.enabled": {"type": "boolean", "default": true, "description": "Master switch for llama.cpp inline suggestions."},
+        "llamaCpp.autocomplete.enable": {
+          "type": "object",
+          "default": {"*": true, "plaintext": false, "markdown": false, "scminput": false},
+          "additionalProperties": {"type": "boolean"},
+          "description": "Enable or disable inline suggestions by VS Code language ID. '*' is the default. Language-specific entries override '*', similar to github.copilot.enable."
+        },
         "llamaCpp.autocomplete.backend": {"type": "string", "enum": ["auto", "fim", "openai"], "default": "auto"},
         "llamaCpp.autocomplete.profile": {"type": "string", "enum": ["fast", "balanced", "quality"], "default": "fast", "description": "Latency profile. Fast and balanced use only an already-loaded local BM25 index for related files; quality can use the full configured RAG pipeline."},
         "llamaCpp.autocomplete.maxTokens": {"type": "number", "default": 48},
