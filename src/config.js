@@ -19,14 +19,18 @@ function getConfig() {
     autocomplete: {
       enabled: c.get('autocomplete.enabled', true),
       backend: c.get('autocomplete.backend', 'auto'),
-      maxTokens: c.get('autocomplete.maxTokens', 128),
-      temperature: c.get('autocomplete.temperature', 0.15),
-      contextLinesBefore: c.get('autocomplete.contextLinesBefore', 80),
-      contextLinesAfter: c.get('autocomplete.contextLinesAfter', 30),
-      debounceMs: c.get('autocomplete.debounceMs', 180),
+      profile: c.get('autocomplete.profile', 'fast'),
+      maxTokens: c.get('autocomplete.maxTokens', 48),
+      temperature: c.get('autocomplete.temperature', 0.1),
+      contextLinesBefore: c.get('autocomplete.contextLinesBefore', 40),
+      contextLinesAfter: c.get('autocomplete.contextLinesAfter', 10),
+      maxPrefixCharacters: c.get('autocomplete.maxPrefixCharacters', 6000),
+      maxSuffixCharacters: c.get('autocomplete.maxSuffixCharacters', 1800),
+      maxPredictMs: c.get('autocomplete.maxPredictMs', 1200),
+      debounceMs: c.get('autocomplete.debounceMs', 140),
       relatedFilesEnabled: c.get('autocomplete.relatedFilesEnabled', true),
-      relatedFilesTopK: c.get('autocomplete.relatedFilesTopK', 4),
-      relatedFilesMaxCharacters: c.get('autocomplete.relatedFilesMaxCharacters', 12000)
+      relatedFilesTopK: c.get('autocomplete.relatedFilesTopK', 1),
+      relatedFilesMaxCharacters: c.get('autocomplete.relatedFilesMaxCharacters', 3000)
     },
     chat: {
       maxTokens: c.get('chat.maxTokens', 1024),
@@ -70,6 +74,9 @@ function getConfig() {
         enabled: c.get('rag.cache.enabled', true),
         maxMegabytes: c.get('rag.cache.maxMegabytes', 128)
       }
+    },
+    metrics: {
+      showStatusBar: c.get('metrics.showStatusBar', true)
     },
     request: {
       timeoutMs: c.get('request.timeoutMs', 120000)
