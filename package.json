@@ -1,16 +1,16 @@
 {
   "name": "llama-cpp-assistant",
   "displayName": "llama.cpp Assistant",
-  "description": "Local or remote llama.cpp autocomplete and Markdown chat with per-request active-file context, hybrid vector RAG, reranking and @file support for Visual Studio Code.",
-  "version": "0.4.0",
+  "description": "Local or remote llama.cpp autocomplete and Markdown chat with explicit editor-context control, performance metrics, hybrid RAG, reranking and @file support for Visual Studio Code.",
+  "version": "0.5.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {"vscode": "^1.95.0"},
   "categories": ["Machine Learning", "Other"],
-  "keywords": ["@file", "AI", "FIM", "RAG", "autocomplete", "embeddings", "hybrid search", "llama", "llama.cpp", "local LLM", "rerank", "Markdown", "context control"],
-  "activationEvents": ["onStartupFinished", "onCommand:llamaCpp.openChat", "onCommand:llamaCpp.askSelection", "onCommand:llamaCpp.setApiKey", "onCommand:llamaCpp.clearApiKey", "onCommand:llamaCpp.testConnection", "onCommand:llamaCpp.triggerCompletion", "onCommand:llamaCpp.reindexWorkspace", "onCommand:llamaCpp.showIndexStatus", "onCommand:llamaCpp.setRagApiKey", "onCommand:llamaCpp.clearRagApiKey"],
+  "keywords": ["@file", "AI", "FIM", "RAG", "autocomplete", "embeddings", "hybrid search", "llama", "llama.cpp", "local LLM", "rerank", "Markdown", "context control", "TTFT", "performance"],
+  "activationEvents": ["onStartupFinished", "onCommand:llamaCpp.openChat", "onCommand:llamaCpp.askSelection", "onCommand:llamaCpp.setApiKey", "onCommand:llamaCpp.clearApiKey", "onCommand:llamaCpp.testConnection", "onCommand:llamaCpp.triggerCompletion", "onCommand:llamaCpp.reindexWorkspace", "onCommand:llamaCpp.showIndexStatus", "onCommand:llamaCpp.setRagApiKey", "onCommand:llamaCpp.clearRagApiKey", "onCommand:llamaCpp.showPerformanceMetrics"],
   "main": "./src/extension.js",
-  "scripts": {"check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check media/chat.js", "package": "npx @vscode/vsce package"},
+  "scripts": {"check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check media/chat.js", "package": "npx @vscode/vsce package"},
   "contributes": {
     "commands": [
       {"command": "llamaCpp.openChat", "title": "Llama.cpp: Open Chat"},
@@ -22,7 +22,8 @@
       {"command": "llamaCpp.reindexWorkspace", "title": "Llama.cpp: Reindex Workspace (RAG)"},
       {"command": "llamaCpp.showIndexStatus", "title": "Llama.cpp: Show RAG Index Status"},
       {"command": "llamaCpp.setRagApiKey", "title": "Llama.cpp: Set RAG API Key"},
-      {"command": "llamaCpp.clearRagApiKey", "title": "Llama.cpp: Clear RAG API Key"}
+      {"command": "llamaCpp.clearRagApiKey", "title": "Llama.cpp: Clear RAG API Key"},
+      {"command": "llamaCpp.showPerformanceMetrics", "title": "Llama.cpp: Show Performance Metrics"}
     ],
     "menus": {"editor/context": [{"command": "llamaCpp.askSelection", "when": "editorHasSelection", "group": "navigation@100"}]},
     "configuration": {"title": "llama.cpp Assistant", "properties": {
@@ -37,20 +38,24 @@
       "llamaCpp.api.model": {"type": "string", "default": ""},
       "llamaCpp.autocomplete.enabled": {"type": "boolean", "default": true},
       "llamaCpp.autocomplete.backend": {"type": "string", "enum": ["auto", "fim", "openai"], "default": "auto"},
-      "llamaCpp.autocomplete.maxTokens": {"type": "number", "default": 128},
-      "llamaCpp.autocomplete.temperature": {"type": "number", "default": 0.15},
-      "llamaCpp.autocomplete.contextLinesBefore": {"type": "number", "default": 80},
-      "llamaCpp.autocomplete.contextLinesAfter": {"type": "number", "default": 30},
-      "llamaCpp.autocomplete.debounceMs": {"type": "number", "default": 180},
+      "llamaCpp.autocomplete.profile": {"type": "string", "enum": ["fast", "balanced", "quality"], "default": "fast", "description": "Latency profile. Fast and balanced use only an already-loaded local BM25 index for related files; quality can use the full configured RAG pipeline."},
+      "llamaCpp.autocomplete.maxTokens": {"type": "number", "default": 48},
+      "llamaCpp.autocomplete.temperature": {"type": "number", "default": 0.1},
+      "llamaCpp.autocomplete.contextLinesBefore": {"type": "number", "default": 40},
+      "llamaCpp.autocomplete.contextLinesAfter": {"type": "number", "default": 10},
+      "llamaCpp.autocomplete.maxPrefixCharacters": {"type": "number", "default": 6000},
+      "llamaCpp.autocomplete.maxSuffixCharacters": {"type": "number", "default": 1800},
+      "llamaCpp.autocomplete.maxPredictMs": {"type": "number", "default": 1200},
+      "llamaCpp.autocomplete.debounceMs": {"type": "number", "default": 140},
       "llamaCpp.autocomplete.relatedFilesEnabled": {"type": "boolean", "default": true},
-      "llamaCpp.autocomplete.relatedFilesTopK": {"type": "number", "default": 4},
-      "llamaCpp.autocomplete.relatedFilesMaxCharacters": {"type": "number", "default": 12000},
+      "llamaCpp.autocomplete.relatedFilesTopK": {"type": "number", "default": 1},
+      "llamaCpp.autocomplete.relatedFilesMaxCharacters": {"type": "number", "default": 3000},
       "llamaCpp.chat.maxTokens": {"type": "number", "default": 1024},
       "llamaCpp.chat.temperature": {"type": "number", "default": 0.3},
       "llamaCpp.chat.streaming": {"type": "boolean", "default": true},
-      "llamaCpp.chat.includeEditorContext": {"type": "boolean", "default": true, "description": "Default state of the chat Current file toggle."},
+      "llamaCpp.chat.includeEditorContext": {"type": "boolean", "default": true, "description": "Default state of the chat Current file toggle. When off, current and other visible editors are not automatically attached."},
       "llamaCpp.chat.maxContextCharacters": {"type": "number", "default": 24000},
-      "llamaCpp.chat.includeVisibleEditors": {"type": "boolean", "default": true},
+      "llamaCpp.chat.includeVisibleEditors": {"type": "boolean", "default": true, "description": "When Current file is enabled, also attach other visible editors."},
       "llamaCpp.chat.maxVisibleFiles": {"type": "number", "default": 4},
       "llamaCpp.chat.maxVisibleContextCharacters": {"type": "number", "default": 16000},
       "llamaCpp.chat.workspaceContextCharacters": {"type": "number", "default": 24000},
@@ -78,7 +83,8 @@
       "llamaCpp.rag.cache.enabled": {"type": "boolean", "default": true},
       "llamaCpp.rag.cache.maxMegabytes": {"type": "number", "default": 128},
       "llamaCpp.chat.mentionedFilesMaxCharacters": {"type": "number", "default": 30000},
-      "llamaCpp.chat.maxMentionedFiles": {"type": "number", "default": 6}
+      "llamaCpp.chat.maxMentionedFiles": {"type": "number", "default": 6},
+      "llamaCpp.metrics.showStatusBar": {"type": "boolean", "default": true}
     }}
   }
 }
