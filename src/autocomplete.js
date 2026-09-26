@@ -2,16 +2,20 @@ const vscode = require('vscode');
 const { getConfig } = require('./config');
 
 class LlamaInlineCompletionProvider {
-  constructor(client, workspaceIndex) {
+  constructor(client, workspaceIndex, inlineSuggestionsController) {
     this.client = client;
     this.workspaceIndex = workspaceIndex;
+    this.inlineSuggestionsController = inlineSuggestionsController;
     this.activeController = undefined;
     this.requestSerial = 0;
   }
 
   async provideInlineCompletionItems(document, position, context, token) {
     const config = getConfig();
-    if (!config.autocomplete.enabled || document.uri.scheme !== 'file') return [];
+    const enabled = this.inlineSuggestionsController
+      ? this.inlineSuggestionsController.isEnabledForDocument(document)
+      : config.autocomplete.enabled;
+    if (!enabled || document.uri.scheme !== 'file') return [];
 
     this.activeController?.abort();
     const serial = ++this.requestSerial;
