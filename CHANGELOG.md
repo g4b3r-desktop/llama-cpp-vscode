@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+- Added a Copilot-style llama.cpp Assistant Status Bar menu for inline suggestion controls.
+- Added enabled, disabled, and snoozed Status Bar states.
+- Added global inline suggestion enable/disable from the Status Bar.
+- Added per-language/file-type inline suggestion controls using VS Code language IDs.
+- Added `llamaCpp.autocomplete.enable`, an object setting with `"*"` fallback and language-specific overrides similar to `github.copilot.enable`.
+- Added one-click reset of a language override back to the global default.
+- Added 5, 15, and 30 minute autocomplete snooze controls with resume support.
+- Added quick actions for triggering a suggestion, opening native Chat, performance metrics, and autocomplete settings.
+- Autocomplete now checks language policy and snooze state before RAG retrieval or any llama.cpp request.
+
 ## 0.6.0
 - Added a native VS Code Language Model Chat Provider for llama.cpp models discovered from `/v1/models`.
 - Added native `@llama` Chat integration with Markdown streaming and VS Code Chat history.
