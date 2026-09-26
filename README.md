@@ -1,41 +1,98 @@
 # llama.cpp Assistant for VS Code
 
-VS Code extension for local or remote llama.cpp with low-latency inline autocomplete, Markdown chat, streaming, workspace RAG, hybrid retrieval, reranking, explicit `@file` context, and performance telemetry.
+A VS Code extension that turns a local or remote `llama.cpp` server into a coding assistant with native VS Code Chat integration, inline autocomplete, code actions, RAG, Markdown streaming, and performance metrics.
 
-## Features
+## v0.6.0 highlights
 
-- Inline autocomplete via llama.cpp FIM or OpenAI-compatible completions
-- Separate autocomplete latency profiles: `fast`, `balanced`, and `quality`
-- Immediate cancellation of stale autocomplete requests while typing
-- Small FIM prompt budgets and optional `t_max_predict_ms` generation budget
-- Fast/balanced autocomplete avoids embeddings/reranking and only uses an already-loaded local BM25 index for related files
-- Chat with streaming responses and Markdown rendering
-- Per-request **Current file** toggle controlling automatic editor context
-- When **Current file** is off, neither the active file nor other visible editors are attached automatically, and visible files are filtered out of RAG results for that request
-- Explicit `@file` and `@"path with spaces"` references always remain available
-- Workspace indexing and RAG
-- Hybrid BM25 + vector retrieval
-- Optional embeddings and reranking endpoints
-- Persistent workspace cache
-- VS Code status-bar performance indicator with TTFT, prompt tok/s, generation tok/s, and cache hit/miss
-- Local `llama-server` auto-start or remote API mode
-- API keys stored in VS Code SecretStorage
+The extension now integrates with VS Code's native AI surfaces instead of relying only on its custom Webview chat.
 
-## Install from source
+- **Native VS Code Chat model provider**: models returned by `GET /v1/models` can appear in the Chat model picker under **llama.cpp**.
+- **Native `@llama` chat assistant** with slash commands:
+  - `/explain`
+  - `/fix`
+  - `/review`
+  - `/tests`
+  - `/refactor`
+  - `/codebase`
+- **Native Chat context attachments**: file and selection references attached with VS Code's context picker are read and sent to llama.cpp.
+- **Native Chat history and Markdown streaming** through the VS Code Chat UI.
+- **Editor AI actions** in the editor context menu:
+  - Inline Edit
+  - Fix Selection
+  - Refactor Selection
+  - Ask About Selection
+  - Review Selection
+  - Generate Tests
+- **Diff preview before applying edits**.
+- Existing FIM autocomplete, hybrid RAG, embeddings, reranking, performance metrics, SecretStorage keys, and classic chat remain available.
 
-Open this repository in VS Code and press `F5` to launch an Extension Development Host.
+## Requirements
 
-## Package
+- VS Code 1.117 or newer.
+- A `llama-server` installed locally, **or** an OpenAI-compatible remote API.
 
-Install `@vscode/vsce` and run:
+## Native Chat
 
-```bash
-vsce package
+Run:
+
+```text
+Llama.cpp: Open Native Chat
 ```
 
-or use the included GitHub Actions workflow, which produces a VSIX artifact on pushes to `main`.
+The command opens VS Code Chat and pre-fills `@llama` when supported by the host.
 
-## Basic API mode
+You can also open Chat normally and type:
+
+```text
+@llama explain this project
+```
+
+Use slash commands for common workflows:
+
+```text
+@llama /review review the authentication flow
+```
+
+```text
+@llama /codebase where is session validation implemented?
+```
+
+### Model picker
+
+The extension contributes a **llama.cpp** model provider to VS Code. It discovers models from:
+
+```text
+GET /v1/models
+```
+
+Select one of the llama.cpp models in VS Code's Chat model picker. `llamaCpp.api.model` remains the default/fallback model.
+
+## Context behavior
+
+In native Chat, use VS Code's **Add Context** control to attach files or selections explicitly. The `@llama` participant reads supported file/selection references and sends their content to llama.cpp.
+
+The classic chat still has its **Current file** toggle. When that toggle is off, current and other visible editor files are not automatically attached, and visible files are filtered out of automatic RAG retrieval. Explicit `@file` references still work.
+
+## Inline editing and smart actions
+
+Right-click code and open **llama.cpp Assistant**. Edit-producing actions generate a proposal and open a VS Code diff before offering **Apply**.
+
+## Autocomplete
+
+Inline completion supports llama.cpp FIM `/infill` and OpenAI-compatible `/v1/completions`.
+
+Recommended low-latency settings:
+
+```json
+{
+  "llamaCpp.autocomplete.profile": "fast",
+  "llamaCpp.autocomplete.maxTokens": 48,
+  "llamaCpp.autocomplete.maxPredictMs": 1200,
+  "llamaCpp.autocomplete.relatedFilesTopK": 1
+}
+```
+
+## API mode
 
 ```json
 {
@@ -45,7 +102,7 @@ or use the included GitHub Actions workflow, which produces a VSIX artifact on p
 }
 ```
 
-Use the command `Llama.cpp: Set API Key` to store the key securely.
+Use **Llama.cpp: Set API Key** to store the key in VS Code SecretStorage.
 
 ## Local mode
 
@@ -59,59 +116,9 @@ Use the command `Llama.cpp: Set API Key` to store the key securely.
 }
 ```
 
-## Low-latency autocomplete
+## Workspace RAG
 
-The default `fast` profile is intentionally much smaller than the chat profile:
-
-```json
-{
-  "llamaCpp.autocomplete.profile": "fast",
-  "llamaCpp.autocomplete.maxTokens": 48,
-  "llamaCpp.autocomplete.contextLinesBefore": 40,
-  "llamaCpp.autocomplete.contextLinesAfter": 10,
-  "llamaCpp.autocomplete.maxPrefixCharacters": 6000,
-  "llamaCpp.autocomplete.maxSuffixCharacters": 1800,
-  "llamaCpp.autocomplete.maxPredictMs": 1200,
-  "llamaCpp.autocomplete.debounceMs": 140,
-  "llamaCpp.autocomplete.relatedFilesTopK": 1,
-  "llamaCpp.autocomplete.relatedFilesMaxCharacters": 3000
-}
-```
-
-Profiles:
-
-- `fast`: smallest prompt, max 48 output tokens, local BM25 related-file lookup only when the workspace index is already loaded, no embedding/reranking request.
-- `balanced`: moderate prompt/output budget and up to two BM25 related files.
-- `quality`: uses the configured autocomplete budgets and the full RAG pipeline.
-
-Set `llamaCpp.autocomplete.maxPredictMs` to `0` if you do not want a llama.cpp FIM generation time budget.
-
-## Performance indicator
-
-After a chat or autocomplete request, the VS Code status bar shows a compact sample similar to:
-
-```text
-Chat 720ms · P88.9 · G6.7 · C✓
-```
-
-Where:
-
-- first value = TTFT / time to first streamed token; for non-streaming autocomplete it is the response latency
-- `P` = prompt processing tokens/second
-- `G` = generation tokens/second
-- `C✓` = prompt cache hit, `C×` = known miss, `C?` = API did not report cache information
-
-Hover the indicator for details or run `Llama.cpp: Show Performance Metrics`. Disable it with:
-
-```json
-{
-  "llamaCpp.metrics.showStatusBar": false
-}
-```
-
-Remote OpenAI-compatible servers that do not expose llama.cpp timing/cache fields will show unavailable metrics instead of fabricated server speeds.
-
-## RAG
+The extension supports BM25, vectors, hybrid retrieval, optional reranking, persistent caching, and explicit file context.
 
 ```json
 {
@@ -125,27 +132,35 @@ Remote OpenAI-compatible servers that do not expose llama.cpp timing/cache field
 }
 ```
 
-## Chat context
+## Performance metrics
 
-The chat UI includes a **Current file** toggle.
-
-When enabled, the current file/selection can be attached, and `llamaCpp.chat.includeVisibleEditors` may also attach other visible editors.
-
-When disabled:
-
-- the active file is not attached;
-- other visible editors are not attached;
-- visible editor files are filtered from automatic RAG results for that request;
-- explicit `@file` references still work.
-
-Examples:
+The status bar reports the latest request using values such as:
 
 ```text
-Explain @src/server.ts
+Chat 720ms · P88.9 · G6.7 · C✓
 ```
 
-```text
-Compare @src/server.ts with @src/api/router.ts
+- TTFT (time to first token)
+- prompt tokens/s
+- generation tokens/s
+- prompt-cache hit state when the server reports it
+
+Use **Llama.cpp: Show Performance Metrics** for details.
+
+## Development
+
+Open the repository in VS Code and press `F5` to launch an Extension Development Host.
+
+Validate JavaScript:
+
+```bash
+npm run check
+```
+
+Package:
+
+```bash
+npx @vscode/vsce package
 ```
 
 ## License
