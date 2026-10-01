@@ -1,10 +1,56 @@
 # llama.cpp Assistant for VS Code
 
-A VS Code extension that turns a local or remote `llama.cpp` server into a coding assistant with native VS Code Chat integration, autonomous agent tools, controlled web research, inline autocomplete, code actions, RAG, Markdown streaming, performance metrics, and Copilot-style inline suggestion controls.
+A VS Code coding assistant that can use **local/remote llama.cpp or the OpenAI API** with native VS Code Chat integration, autonomous agent tools, controlled web research, inline autocomplete, code actions, RAG, Markdown streaming, performance metrics, and Copilot-style inline suggestion controls.
+
+## v0.10.0 highlights — OpenAI API provider
+
+The assistant can now switch between `llama.cpp` and the **OpenAI API** without changing the Agent Mode architecture. OpenAI uses the Responses API for Chat and Agent Mode; the extension still owns and executes every filesystem, terminal, diagnostics, and web-research tool.
+
+### Configure OpenAI
+
+1. Run **Llama.cpp: Manage Model Provider** and choose **Use OpenAI API**.
+2. Run **Llama.cpp: Set OpenAI API Key**. The key is stored in VS Code SecretStorage.
+3. Open native Chat and use `@llama` normally, or select an available OpenAI model in the VS Code model picker.
+
+Equivalent settings:
+
+```json
+{
+  "llamaCpp.provider": "openai",
+  "llamaCpp.openai.baseUrl": "https://api.openai.com/v1",
+  "llamaCpp.openai.model": "gpt-5.6-luna",
+  "llamaCpp.openai.reasoningEffort": "low",
+  "llamaCpp.openai.store": false
+}
+```
+
+Supported through the OpenAI provider:
+
+- normal and streaming `@llama` Chat;
+- `/agent` with function calling and the existing controlled `ToolRegistry`;
+- `/research` using the extension's controlled web tools;
+- explain/fix/review/refactor/test editor actions;
+- VS Code model picker discovery through `/v1/models`;
+- performance token/cache metrics when usage metadata is available;
+- optional RAG embeddings with `text-embedding-3-small` or another configured embedding model.
+
+OpenAI inline autocomplete and OpenAI embeddings are **opt-in** because they may produce many billable API requests:
+
+```json
+{
+  "llamaCpp.openai.useForAutocomplete": false,
+  "llamaCpp.openai.useForEmbeddings": false,
+  "llamaCpp.openai.embeddingModel": "text-embedding-3-small"
+}
+```
+
+When OpenAI embeddings are disabled, configure a separate embedding server or use BM25/fallback retrieval. A custom reranker endpoint can still be used; the extension does not assume an OpenAI rerank endpoint.
+
+To return to the local model, open **Llama.cpp: Manage Model Provider** and choose **Use llama.cpp**. The default provider remains `llamacpp`.
 
 ## v0.9.0 highlights — detailed web research
 
-Agent Mode can now research the public internet without giving the LLM unrestricted network access. The model can choose only controlled tools exposed by the extension:
+Agent Mode can research the public internet without giving the LLM unrestricted network access. The model can choose only controlled tools exposed by the extension:
 
 - `web_search` — discover current web results and snippets;
 - `fetch_url` — safely read one public HTTP(S) source;
@@ -110,7 +156,7 @@ The UI only shows actions such as `Procurando arquivos...`, `Pesquisando na web.
 }
 ```
 
-For llama.cpp native function/tool calling, run a compatible `llama-server` configuration (current llama.cpp supports OpenAI-style tool calls, typically with Jinja chat templates enabled). The adapter also accepts llama.cpp responses where tool arguments are returned as either a JSON string or an object.
+For llama.cpp native function/tool calling, run a compatible `llama-server` configuration. The adapter accepts tool arguments returned as either a JSON string or an object.
 
 ## v0.7.0 highlights
 
@@ -119,13 +165,13 @@ For llama.cpp native function/tool calling, run a compatible `llama-server` conf
 - Enable/disable inline suggestions globally or for the active VS Code language/file type.
 - `llamaCpp.autocomplete.enable` uses `"*"` as the default with language-specific overrides.
 - Snooze inline suggestions for 5, 15, or 30 minutes.
-- Disabled languages are checked before RAG or llama.cpp calls.
+- Disabled languages are checked before RAG or model calls.
 
 ## Native Chat
 
 The extension integrates with VS Code's native AI surfaces.
 
-- llama.cpp models returned by `GET /v1/models` can appear in the Chat model picker.
+- Models from the active provider can appear in the Chat model picker.
 - Native `@llama` participant with `/agent`, `/research`, `/explain`, `/fix`, `/review`, `/tests`, `/refactor`, and `/codebase`.
 - Native VS Code Chat context attachments, Markdown streaming, and Chat history.
 - Editor actions with diff preview before applying model-generated edits.
@@ -162,7 +208,7 @@ Click the llama.cpp Assistant icon in the VS Code Status Bar to enable/disable i
 
 ## Autocomplete
 
-Inline completion supports llama.cpp FIM `/infill` and OpenAI-compatible `/v1/completions`.
+For llama.cpp, inline completion supports FIM `/infill` and OpenAI-compatible `/v1/completions`. OpenAI Responses-based autocomplete is available only when explicitly enabled.
 
 ```json
 {
@@ -177,22 +223,24 @@ Inline completion supports llama.cpp FIM `/infill` and OpenAI-compatible `/v1/co
 
 In native Chat, use VS Code's **Add Context** control to attach files or selections explicitly. The classic chat still has its **Current file** toggle; when off, current/visible files are not attached or rediscovered through automatic RAG.
 
-## API mode
+## llama.cpp API mode
 
 ```json
 {
+  "llamaCpp.provider": "llamacpp",
   "llamaCpp.mode": "api",
   "llamaCpp.api.baseUrl": "http://127.0.0.1:8080/v1",
   "llamaCpp.api.model": ""
 }
 ```
 
-Use **Llama.cpp: Set API Key** to store the model API key in VS Code SecretStorage. Web-search credentials use the separate **Llama.cpp: Set Web Search API Key** command.
+Use **Llama.cpp: Set llama.cpp/API Key** to store the compatible API key in VS Code SecretStorage. OpenAI and web-search credentials use separate SecretStorage entries.
 
-## Local mode
+## llama.cpp local mode
 
 ```json
 {
+  "llamaCpp.provider": "llamacpp",
   "llamaCpp.mode": "local",
   "llamaCpp.local.executable": "llama-server",
   "llamaCpp.local.modelPath": "/path/to/model.gguf",
@@ -203,7 +251,7 @@ Use **Llama.cpp: Set API Key** to store the model API key in VS Code SecretStora
 
 ## Workspace RAG
 
-The extension supports BM25, vectors, hybrid retrieval, optional reranking, persistent caching, and explicit file context.
+The extension supports BM25, vectors, hybrid retrieval, optional reranking, persistent caching, and explicit file context. OpenAI embeddings are opt-in; a separate llama.cpp embedding server can still be used regardless of the primary Chat provider.
 
 ## Performance metrics
 
