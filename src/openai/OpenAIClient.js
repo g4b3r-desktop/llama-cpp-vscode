@@ -1,7 +1,8 @@
+const crypto = require('crypto');
 const vscode = require('vscode');
 const { getConfig, endpointFromBase } = require('../config');
 const { requestJson, requestSse } = require('../http');
-const { toResponsesInput, extractResponseText } = require('./responseUtils');
+const { toResponsesInput, toResponsesTools, extractResponseText, extractFunctionCalls } = require('./responseUtils');
 
 class OpenAIClient {
   constructor(secrets, output, metricsSink) {
@@ -87,6 +88,35 @@ class OpenAIClient {
     return body;
   }
 
+  async agentTurn({ messages, tools, signal, model }) {
+    const config = getConfig();
+    const startedAt = Date.now();
+    const body = {
+      model: String(model || config.openai.model || 'gpt-5.6-luna').trim(),
+      input: toResponsesInput(messages),
+      tools: toResponsesTools(tools),
+      tool_choice: 'auto',
+      parallel_tool_calls: false,
+      max_output_tokens: Math.max(64, Number(config.agent.maxTokensPerStep || 2048)),
+      store: Boolean(config.openai.store)
+    };
+    const effort = String(config.openai.reasoningEffort || '').trim();
+    if (effort) body.reasoning = { effort };
+    const data = await requestJson(this.endpoint('/responses'), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, config.request.timeoutMs, signal);
+    this.metricsSink?.emitMetrics('agent', startedAt, Date.now(), normalizeUsagePayload(data));
+    const content = extractResponseText(data).trim();
+    let calls = extractFunctionCalls(data);
+    if (!calls.length) {
+      const fallback = parseFallbackToolCall(content);
+      if (fallback) calls = [fallback];
+    }
+    return {
+      content: calls.length && calls[0]?.fallback ? '' : content,
+      toolCalls: calls,
+      assistantMessage: calls.length ? toAssistantMessage(content, calls) : { role: 'assistant', content }
+    };
+  }
+
   async complete(prefix, suffix, languageId, signal, extraFiles = [], options = {}) {
     const config = getConfig();
     if (!config.openai.useForAutocomplete) return '';
@@ -128,6 +158,22 @@ function normalizeUsagePayload(data) {
       prompt_tokens_details: { cached_tokens: usage?.input_tokens_details?.cached_tokens }
     }
   };
+}
+
+function parseFallbackToolCall(content) {
+  const text = String(content || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
+  if (!text.startsWith('{')) return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    const name = parsed.tool || parsed.name;
+    const args = parsed.arguments || parsed.args;
+    if (!name || !args || typeof args !== 'object') return undefined;
+    return { id: `call_${crypto.randomBytes(6).toString('hex')}`, name: String(name), arguments: args, fallback: true };
+  } catch { return undefined; }
+}
+
+function toAssistantMessage(content, calls) {
+  return { role: 'assistant', content: content || '', tool_calls: calls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.arguments || {}) } })) };
 }
 
 function isUsefulModel(id) {
