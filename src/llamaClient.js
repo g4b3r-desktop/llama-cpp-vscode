@@ -166,7 +166,10 @@ class LlamaClient {
     const values = Array.isArray(inputs) ? inputs.map(String) : [String(inputs)];
     if (!values.length) return [];
     const customBase = String(config.rag.embedding.baseUrl || '').trim();
-    if (!customBase && config.provider === 'openai') return this.openai.embed(values, signal);
+    if (!customBase && config.provider === 'openai') {
+      if (!config.openai.useForEmbeddings) throw new Error('OpenAI embeddings are disabled. Enable llamaCpp.openai.useForEmbeddings or configure a separate RAG embedding endpoint.');
+      return this.openai.embed(values, signal);
+    }
     if (!customBase) await this.ensureReady();
     const base = customBase || configuredBaseUrl(config);
     const body = { input: values };
