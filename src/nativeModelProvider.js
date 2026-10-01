@@ -48,8 +48,8 @@ function modelInfos(models, provider = 'llamacpp') {
     name: id,
     family: isOpenAI ? inferOpenAIFamily(id) : inferFamily(id),
     version: '1',
-    maxInputTokens: isOpenAI ? 1000000 : 32768,
-    maxOutputTokens: isOpenAI ? 128000 : 8192,
+    maxInputTokens: isOpenAI ? 128000 : 32768,
+    maxOutputTokens: isOpenAI ? 32768 : 8192,
     detail: isOpenAI ? 'OpenAI API' : 'llama.cpp',
     tooltip: isOpenAI ? `Model via OpenAI Responses API: ${id}` : `Model served by llama.cpp: ${id}`,
     capabilities: { imageInput: false, toolCalling: false }
