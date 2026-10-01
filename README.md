@@ -1,18 +1,133 @@
-# llama.cpp Assistant for VS Code
+# llama.cpp Assistant para VS Code
 
-A VS Code coding assistant that can use **local/remote llama.cpp or the OpenAI API** with native VS Code Chat integration, autonomous agent tools, controlled web research, inline autocomplete, code actions, RAG, Markdown streaming, performance metrics, and Copilot-style inline suggestion controls.
+Extensão para transformar o VS Code em um assistente de programação com suporte a **llama.cpp local/remoto** e à **API da OpenAI**. O projeto reúne Chat nativo, Agent Mode, pesquisa web controlada, sugestões inline, ações de edição, RAG, métricas de desempenho e controles semelhantes aos fluxos do GitHub Copilot.
 
-## v0.10.0 highlights — OpenAI API provider
+## Principais recursos
 
-The assistant can now switch between `llama.cpp` and the **OpenAI API** without changing the Agent Mode architecture. OpenAI uses the Responses API for Chat and Agent Mode; the extension still owns and executes every filesystem, terminal, diagnostics, and web-research tool.
+- Chat nativo do VS Code com `@llama`.
+- Provider alternável entre `llama.cpp` e OpenAI.
+- Agent Mode com ferramentas controladas para arquivos, buscas, diagnósticos e terminal.
+- Pesquisa detalhada na internet com Brave Search ou SearXNG.
+- Sugestões inline por linguagem/tipo de arquivo.
+- Edição, correção, refatoração, revisão e geração de testes.
+- RAG com BM25, embeddings, busca híbrida e reranking opcional.
+- Diff antes de alterações importantes, backups e rollback do agente.
+- Métricas de TTFT, tokens/s e cache quando o backend fornece esses dados.
+- Modo de **inferência sem histórico anterior** para reduzir contexto e obter uma resposta independente da conversa anterior.
 
-### Configure OpenAI
+## Requisitos
 
-1. Run **Llama.cpp: Manage Model Provider** and choose **Use OpenAI API**.
-2. Run **Llama.cpp: Set OpenAI API Key**. The key is stored in VS Code SecretStorage.
-3. Open native Chat and use `@llama` normally, or select an available OpenAI model in the VS Code model picker.
+- VS Code `1.117.0` ou superior.
+- Para modo local: `llama-server` disponível no sistema ou configurado em `llamaCpp.local.executable`.
+- Para OpenAI: uma chave válida da API da OpenAI.
+- Para pesquisa web: Brave Search API ou uma instância SearXNG configurada.
 
-Equivalent settings:
+## Instalação
+
+Baixe o arquivo `.vsix` da versão mais recente em **Releases** e instale pelo VS Code:
+
+1. Abra a Command Palette com `Ctrl+Shift+P`.
+2. Execute **Extensions: Install from VSIX...**.
+3. Selecione `llama-cpp-assistant-<versão>.vsix`.
+4. Execute **Developer: Reload Window** se necessário.
+
+Para desenvolvimento, abra este repositório e use `Ctrl+F5` para iniciar um Extension Development Host sem pausar na primeira linha. `F5` inicia uma sessão de depuração e pode parar o Extension Host aguardando o debugger.
+
+---
+
+## Escolhendo o provider de IA
+
+Execute:
+
+```text
+Llama.cpp: Manage Model Provider
+```
+
+Você pode escolher:
+
+- **Use llama.cpp** — modelo local ou endpoint OpenAI-compatible baseado em llama.cpp.
+- **Use OpenAI API** — usa a Responses API da OpenAI.
+
+A opção também pode ser definida no `settings.json`:
+
+```json
+{
+  "llamaCpp.provider": "llamacpp"
+}
+```
+
+ou:
+
+```json
+{
+  "llamaCpp.provider": "openai"
+}
+```
+
+---
+
+## Configurando llama.cpp local
+
+Exemplo:
+
+```json
+{
+  "llamaCpp.provider": "llamacpp",
+  "llamaCpp.mode": "local",
+  "llamaCpp.local.executable": "llama-server",
+  "llamaCpp.local.modelPath": "/caminho/modelo.gguf",
+  "llamaCpp.local.host": "127.0.0.1",
+  "llamaCpp.local.port": 8080,
+  "llamaCpp.local.autoStart": true
+}
+```
+
+Argumentos adicionais são enviados para o `llama-server` por `llamaCpp.local.args`.
+
+Exemplo com contexto de 8192 tokens:
+
+```json
+{
+  "llamaCpp.local.args": [
+    "--ctx-size",
+    "8192"
+  ]
+}
+```
+
+Use um tamanho compatível com o modelo e com a memória disponível.
+
+### Conectando a um llama.cpp remoto
+
+```json
+{
+  "llamaCpp.provider": "llamacpp",
+  "llamaCpp.mode": "api",
+  "llamaCpp.api.baseUrl": "http://127.0.0.1:8080/v1",
+  "llamaCpp.api.model": ""
+}
+```
+
+Se o endpoint exigir chave, execute:
+
+```text
+Llama.cpp: Set llama.cpp/API Key
+```
+
+A chave é armazenada no SecretStorage do VS Code.
+
+---
+
+## Configurando a API da OpenAI
+
+1. Execute **Llama.cpp: Manage Model Provider**.
+2. Escolha **Use OpenAI API**.
+3. Execute **Llama.cpp: Set OpenAI API Key**.
+4. Cole sua chave da API.
+
+A chave fica no **VS Code SecretStorage** e não no `settings.json`.
+
+Configuração equivalente:
 
 ```json
 {
@@ -24,17 +139,18 @@ Equivalent settings:
 }
 ```
 
-Supported through the OpenAI provider:
+O provider OpenAI é usado por:
 
-- normal and streaming `@llama` Chat;
-- `/agent` with function calling and the existing controlled `ToolRegistry`;
-- `/research` using the extension's controlled web tools;
-- explain/fix/review/refactor/test editor actions;
-- VS Code model picker discovery through `/v1/models`;
-- performance token/cache metrics when usage metadata is available;
-- optional RAG embeddings with `text-embedding-3-small` or another configured embedding model.
+- Chat normal e streaming;
+- Agent Mode;
+- function calling do agente;
+- pesquisa detalhada via ferramentas da extensão;
+- ações de edição/revisão/refatoração/testes;
+- seleção de modelos pelo model picker do VS Code.
 
-OpenAI inline autocomplete and OpenAI embeddings are **opt-in** because they may produce many billable API requests:
+### Controle de custos com OpenAI
+
+Autocomplete e embeddings via OpenAI ficam desligados por padrão:
 
 ```json
 {
@@ -44,71 +160,148 @@ OpenAI inline autocomplete and OpenAI embeddings are **opt-in** because they may
 }
 ```
 
-When OpenAI embeddings are disabled, configure a separate embedding server or use BM25/fallback retrieval. A custom reranker endpoint can still be used; the extension does not assume an OpenAI rerank endpoint.
+Isso evita chamadas pagas frequentes enquanto você digita ou indexa muitos arquivos.
 
-To return to the local model, open **Llama.cpp: Manage Model Provider** and choose **Use llama.cpp**. The default provider remains `llamacpp`.
+---
 
-## v0.9.0 highlights — detailed web research
+## Chat nativo
 
-Agent Mode can research the public internet without giving the LLM unrestricted network access. The model can choose only controlled tools exposed by the extension:
-
-- `web_search` — discover current web results and snippets;
-- `fetch_url` — safely read one public HTTP(S) source;
-- `research_web` — search, diversify domains, read multiple sources, and return evidence plus URLs.
-
-Use the native Chat command:
+Abra com:
 
 ```text
-@llama /research pesquise as mudanças mais recentes do llama.cpp server, compare várias fontes e responda com links
+Llama.cpp: Open Native Chat
 ```
 
-You can also use normal Agent Mode and let the model decide when web research is necessary:
+Depois use:
 
 ```text
-@llama /agent verifique na documentação atual se esta API mudou e atualize meu código se necessário
+@llama explique este código
 ```
 
-### Search providers
+Comandos disponíveis:
 
-Two providers are supported:
+```text
+@llama /fresh
+@llama /agent
+@llama /research
+@llama /explain
+@llama /fix
+@llama /review
+@llama /tests
+@llama /refactor
+@llama /codebase
+```
 
-1. **Brave Search API** — run **Llama.cpp: Set Web Search API Key**. The key is stored in VS Code SecretStorage and sent only to Brave Search.
-2. **SearXNG** — set `llamaCpp.agent.web.searxngBaseUrl` to your instance. JSON output must be enabled by that SearXNG instance.
+### Inferência sem usar a conversa anterior
 
-`provider: "auto"` uses Brave when a web-search key exists; otherwise it uses SearXNG.
+A versão `0.10.1` adiciona uma forma explícita de responder sem enviar o histórico anterior ao modelo.
+
+No Chat nativo:
+
+```text
+@llama /fresh explique esta função sem considerar nossa conversa anterior
+```
+
+`/fresh` ignora as mensagens anteriores **somente nessa inferência**. Arquivos anexados com **Add Context**, arquivo atual/RAG automático e o prompt atual continuam podendo ser enviados normalmente.
+
+Também existe a configuração global:
 
 ```json
 {
-  "llamaCpp.agent.web.enabled": true,
-  "llamaCpp.agent.web.provider": "auto",
-  "llamaCpp.agent.web.searxngBaseUrl": "http://127.0.0.1:8888",
-  "llamaCpp.agent.web.maxResults": 8,
-  "llamaCpp.agent.web.maxSources": 5,
-  "llamaCpp.agent.web.maxFetchCharacters": 20000,
-  "llamaCpp.agent.web.maxResearchCharacters": 30000,
-  "llamaCpp.agent.web.timeoutMs": 15000,
-  "llamaCpp.agent.web.allowedDomains": [],
-  "llamaCpp.agent.web.blockedDomains": []
+  "llamaCpp.chat.includeHistory": false
 }
 ```
 
-### Web safety
+Com `false`, solicitações normais de Chat não enviam os turnos anteriores. Para voltar ao comportamento tradicional:
 
-The LLM never receives a raw network socket. `fetch_url` is implemented by the extension and enforces HTTP(S), rejects URL credentials, validates DNS, pins the validated IP for the connection, revalidates redirects, and blocks localhost, private/link-local/reserved networks and common cloud metadata hosts. Optional domain allow/block lists can further restrict research.
-
-Fetched pages are explicitly marked as **untrusted external data**. The system prompt instructs the model to ignore instructions, tool requests, credential prompts, or policy overrides embedded in web pages and use source content only as evidence. Detailed research is instructed to cite the URLs it used and corroborate important claims where practical.
-
-## v0.8.0 highlights — local Agent Mode
-
-Use the native Chat participant with:
-
-```text
-@llama /agent fix the failing tests and verify the solution
+```json
+{
+  "llamaCpp.chat.includeHistory": true
+}
 ```
 
-The agent works as a controlled tool loop: the model chooses an action, the extension executes it, returns the result, and the model decides the next action. The LLM never receives direct filesystem, shell, or network access.
+No Chat clássico há um checkbox **Usar conversa anterior**. Ele permite alterar esse comportamento a cada prompt sem modificar permanentemente o `settings.json`.
 
-Built-in workspace/terminal tools:
+> Desativar o histórico reduz o contexto, mas não desativa automaticamente arquivo atual, anexos ou RAG. Esses mecanismos são independentes.
+
+### Controle de arquivo atual
+
+No Chat clássico, o checkbox **Arquivo atual** controla o envio automático do arquivo/seleção ativa e editores visíveis.
+
+Quando desligado:
+
+- arquivo atual não é anexado automaticamente;
+- editores visíveis não são anexados automaticamente;
+- referências explícitas `@arquivo` continuam funcionando;
+- o RAG evita recolocar automaticamente os arquivos visíveis que foram excluídos desse modo.
+
+No Chat nativo, use **Add Context** para anexar arquivos e seleções explicitamente.
+
+---
+
+## Contexto e erro "request exceeds the available context size"
+
+Se o `llama-server` mostrar algo como:
+
+```text
+request (5673 tokens) exceeds the available context size (4096 tokens)
+```
+
+significa que a soma de instruções + histórico + código + RAG + anexos ultrapassou a janela de contexto configurada no servidor.
+
+As principais soluções são:
+
+1. usar `/fresh` ou desligar `llamaCpp.chat.includeHistory`;
+2. aumentar `--ctx-size` se o modelo suportar;
+3. reduzir o contexto automático do Chat;
+4. reduzir `rag.topK`;
+5. anexar menos arquivos grandes.
+
+Exemplo conservador para um servidor com apenas 4096 tokens:
+
+```json
+{
+  "llamaCpp.chat.includeHistory": false,
+  "llamaCpp.chat.maxTokens": 768,
+  "llamaCpp.chat.maxContextCharacters": 9000,
+  "llamaCpp.chat.workspaceContextCharacters": 6000,
+  "llamaCpp.chat.maxVisibleContextCharacters": 5000,
+  "llamaCpp.chat.mentionedFilesMaxCharacters": 8000,
+  "llamaCpp.rag.topK": 3
+}
+```
+
+Esses limites usam caracteres como aproximação em várias partes da extensão; o tokenizador real depende do modelo. Se continuar excedendo, reduza mais os valores ou aumente a janela do servidor.
+
+---
+
+## Agent Mode
+
+Use:
+
+```text
+@llama /agent corrija os testes que estão falhando e valide a solução
+```
+
+O agente funciona em loop controlado:
+
+```text
+Pedido do usuário
+↓
+Modelo escolhe uma ferramenta
+↓
+A extensão valida e executa a ferramenta
+↓
+Resultado volta para o modelo
+↓
+Modelo escolhe a próxima ação
+↓
+Repete até concluir ou atingir o limite de passos
+```
+
+O LLM **não recebe acesso direto** ao sistema de arquivos, terminal ou socket de rede.
+
+### Ferramentas do workspace
 
 - `list_directory`
 - `search_files`
@@ -123,25 +316,27 @@ Built-in workspace/terminal tools:
 - `run_terminal`
 - `get_errors`
 
-The agent discovers relevant files itself instead of sending the entire repository to the model. It starts with only a shallow workspace summary and tool schemas.
+### Proteções do agente
 
-### Agent safety
+- caminhos precisam ficar dentro da raiz do workspace;
+- caminhos absolutos e traversal `..` são rejeitados;
+- symlinks são verificados para impedir escape do projeto;
+- operações perigosas exigem Workspace Trust e/ou confirmação;
+- arquivos existentes precisam ser lidos antes de editar/mover/excluir;
+- SHA-256 detecta alteração externa antes de sobrescrever;
+- backups são mantidos por sessão;
+- alterações retornam diff;
+- a última sessão pode ser revertida;
+- terminal possui timeout e limite de saída;
+- número de passos do agente é limitado.
 
-- all paths are workspace-relative;
-- absolute paths and `..` traversal are rejected;
-- resolved symlinks are checked so they cannot escape the workspace;
-- Workspace Trust is required for writes and terminal commands;
-- existing files must be read before edit/move/delete;
-- hashes detect external changes before overwrite;
-- delete/move and terminal operations use approval controls;
-- each task has a configurable maximum step count;
-- backups are stored in VS Code extension storage;
-- file writes return unified diffs;
-- **Llama.cpp: Roll Back Last Agent Changes** restores the last session and detects post-agent external changes before overwriting them.
+Rollback:
 
-The UI only shows actions such as `Procurando arquivos...`, `Pesquisando na web...`, `Lendo fonte web...`, `Alterando src/app.js...`, `Executando comando...`, and `Tarefa concluída.`. Private model reasoning is not displayed.
+```text
+Llama.cpp: Roll Back Last Agent Changes
+```
 
-### Agent settings
+Configuração principal:
 
 ```json
 {
@@ -156,41 +351,105 @@ The UI only shows actions such as `Procurando arquivos...`, `Pesquisando na web.
 }
 ```
 
-For llama.cpp native function/tool calling, run a compatible `llama-server` configuration. The adapter accepts tool arguments returned as either a JSON string or an object.
-
-## v0.7.0 highlights
-
-- **Copilot-style Status Bar menu** for inline suggestions.
-- Status icon shows enabled, disabled, or temporarily snoozed state.
-- Enable/disable inline suggestions globally or for the active VS Code language/file type.
-- `llamaCpp.autocomplete.enable` uses `"*"` as the default with language-specific overrides.
-- Snooze inline suggestions for 5, 15, or 30 minutes.
-- Disabled languages are checked before RAG or model calls.
-
-## Native Chat
-
-The extension integrates with VS Code's native AI surfaces.
-
-- Models from the active provider can appear in the Chat model picker.
-- Native `@llama` participant with `/agent`, `/research`, `/explain`, `/fix`, `/review`, `/tests`, `/refactor`, and `/codebase`.
-- Native VS Code Chat context attachments, Markdown streaming, and Chat history.
-- Editor actions with diff preview before applying model-generated edits.
-
-Run:
+A interface mostra apenas ações executadas, por exemplo:
 
 ```text
-Llama.cpp: Open Native Chat
+Procurando arquivos...
+Lendo src/app.js...
+Alterando src/app.js...
+Executando testes...
+Analisando erros...
+Tarefa concluída.
 ```
 
-Or start Agent Mode directly with:
+O raciocínio privado do modelo não é exibido.
+
+---
+
+## Pesquisa detalhada na internet
+
+O Agent Mode pode usar ferramentas controladas:
+
+- `web_search` — encontra resultados e snippets;
+- `fetch_url` — lê uma fonte HTTP(S) específica;
+- `research_web` — pesquisa, diversifica domínios e lê múltiplas fontes.
+
+Exemplo:
 
 ```text
-Llama.cpp: Run Agent
+@llama /research pesquise as mudanças mais recentes do llama.cpp server e responda com as fontes
 ```
 
-## Inline suggestions Status Bar menu
+Ou dentro do agente:
 
-Click the llama.cpp Assistant icon in the VS Code Status Bar to enable/disable inline suggestions globally or for the current file type, reset a language override, snooze suggestions, trigger completion, or open Chat/settings/metrics.
+```text
+@llama /agent pesquise a documentação atual da biblioteca usada neste projeto, compare com nosso código, atualize o necessário e execute os testes
+```
+
+### Brave Search
+
+Execute:
+
+```text
+Llama.cpp: Set Web Search API Key
+```
+
+A chave fica no SecretStorage.
+
+### SearXNG
+
+```json
+{
+  "llamaCpp.agent.web.provider": "searxng",
+  "llamaCpp.agent.web.searxngBaseUrl": "http://127.0.0.1:8888"
+}
+```
+
+Configuração completa típica:
+
+```json
+{
+  "llamaCpp.agent.web.enabled": true,
+  "llamaCpp.agent.web.provider": "auto",
+  "llamaCpp.agent.web.maxResults": 8,
+  "llamaCpp.agent.web.maxSources": 5,
+  "llamaCpp.agent.web.maxFetchCharacters": 20000,
+  "llamaCpp.agent.web.maxResearchCharacters": 30000,
+  "llamaCpp.agent.web.timeoutMs": 15000,
+  "llamaCpp.agent.web.allowedDomains": [],
+  "llamaCpp.agent.web.blockedDomains": []
+}
+```
+
+### Segurança da pesquisa web
+
+A extensão controla a rede e aplica proteções como:
+
+- HTTP(S) apenas;
+- rejeição de credenciais embutidas na URL;
+- validação de DNS;
+- revalidação de redirects;
+- bloqueio de localhost, redes privadas, link-local, reservadas e hosts comuns de metadata;
+- allowlist/blocklist opcionais de domínios;
+- conteúdo web marcado como dado externo não confiável.
+
+O modelo é instruído a não obedecer comandos encontrados dentro das páginas pesquisadas.
+
+---
+
+## Sugestões inline
+
+A Status Bar possui um menu no estilo de controle do Copilot para:
+
+- ativar/desativar sugestões globalmente;
+- ativar/desativar por linguagem do arquivo atual;
+- remover override da linguagem;
+- Snooze por 5, 15 ou 30 minutos;
+- retomar sugestões;
+- disparar autocomplete manualmente;
+- abrir Chat, métricas e configurações.
+
+Exemplo:
 
 ```json
 {
@@ -206,9 +465,7 @@ Click the llama.cpp Assistant icon in the VS Code Status Bar to enable/disable i
 }
 ```
 
-## Autocomplete
-
-For llama.cpp, inline completion supports FIM `/infill` and OpenAI-compatible `/v1/completions`. OpenAI Responses-based autocomplete is available only when explicitly enabled.
+Para llama.cpp, autocomplete pode usar FIM `/infill` ou endpoint OpenAI-compatible `/v1/completions`.
 
 ```json
 {
@@ -219,45 +476,77 @@ For llama.cpp, inline completion supports FIM `/infill` and OpenAI-compatible `/
 }
 ```
 
-## Context behavior
+---
 
-In native Chat, use VS Code's **Add Context** control to attach files or selections explicitly. The classic chat still has its **Current file** toggle; when off, current/visible files are not attached or rediscovered through automatic RAG.
+## RAG do workspace
 
-## llama.cpp API mode
+O RAG suporta:
 
-```json
-{
-  "llamaCpp.provider": "llamacpp",
-  "llamaCpp.mode": "api",
-  "llamaCpp.api.baseUrl": "http://127.0.0.1:8080/v1",
-  "llamaCpp.api.model": ""
-}
-```
+- BM25;
+- embeddings;
+- busca vetorial;
+- modo híbrido;
+- reranking opcional;
+- cache persistente;
+- `@file` explícito;
+- exclusão de diretórios comuns como `.git`, `node_modules`, `dist`, `build`, `venv`, `target` e outros.
 
-Use **Llama.cpp: Set llama.cpp/API Key** to store the compatible API key in VS Code SecretStorage. OpenAI and web-search credentials use separate SecretStorage entries.
-
-## llama.cpp local mode
+Exemplo:
 
 ```json
 {
-  "llamaCpp.provider": "llamacpp",
-  "llamaCpp.mode": "local",
-  "llamaCpp.local.executable": "llama-server",
-  "llamaCpp.local.modelPath": "/path/to/model.gguf",
-  "llamaCpp.local.port": 8080,
-  "llamaCpp.local.autoStart": true
+  "llamaCpp.rag.enabled": true,
+  "llamaCpp.rag.strategy": "hybrid",
+  "llamaCpp.rag.topK": 6,
+  "llamaCpp.rag.embedding.enabled": true,
+  "llamaCpp.rag.rerank.enabled": false
 }
 ```
 
-## Workspace RAG
+OpenAI embeddings são opcionais e podem ser usados mesmo com outro provider de Chat, se explicitamente habilitados.
 
-The extension supports BM25, vectors, hybrid retrieval, optional reranking, persistent caching, and explicit file context. OpenAI embeddings are opt-in; a separate llama.cpp embedding server can still be used regardless of the primary Chat provider.
+---
 
-## Performance metrics
+## Métricas de desempenho
 
-The performance status item reports TTFT, prompt tokens/s, generation tokens/s, and prompt-cache state when available.
+Quando o backend fornece dados suficientes, o indicador mostra:
 
-## Development
+- TTFT — tempo até o primeiro token;
+- velocidade de processamento do prompt;
+- velocidade de geração;
+- tokens reutilizados pelo prompt cache.
+
+Abra os detalhes com:
+
+```text
+Llama.cpp: Show Performance Metrics
+```
+
+---
+
+## Comandos úteis
+
+```text
+Llama.cpp: Open Native Chat
+Llama.cpp: Open Classic Chat
+Llama.cpp: Run Agent
+Llama.cpp: Roll Back Last Agent Changes
+Llama.cpp: Manage Model Provider
+Llama.cpp: Set OpenAI API Key
+Llama.cpp: Set llama.cpp/API Key
+Llama.cpp: Set Web Search API Key
+Llama.cpp: Test Connection
+Llama.cpp: Reindex Workspace (RAG)
+Llama.cpp: Show RAG Index Status
+Llama.cpp: Show Performance Metrics
+Llama.cpp: Configure Inline Suggestions
+```
+
+---
+
+## Desenvolvimento
+
+Validação local:
 
 ```bash
 npm run check
@@ -265,8 +554,30 @@ npm test
 npx @vscode/vsce package
 ```
 
-Open the repository in VS Code and press `F5` to launch an Extension Development Host.
+Para abrir o Extension Development Host sem debugger:
 
-## License
+```text
+Ctrl+F5
+```
+
+Para depurar:
+
+```text
+F5
+```
+
+Se aparecer `STOPPED on first line for debugging`, o Extension Host está aguardando o debugger continuar; isso acontece antes da ativação da extensão.
+
+---
+
+## Privacidade e credenciais
+
+- chave OpenAI: VS Code SecretStorage;
+- chave do endpoint llama.cpp/API-compatible: SecretStorage separado;
+- chave Brave Search: SecretStorage separado;
+- o Agent Mode não entrega acesso direto ao filesystem/terminal para o LLM;
+- `llamaCpp.openai.store` é `false` por padrão.
+
+## Licença
 
 MIT
