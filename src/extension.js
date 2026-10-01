@@ -10,6 +10,7 @@ const { registerNativeChat } = require('./nativeChat');
 const { EditorActions } = require('./editorActions');
 const { InlineSuggestionsController } = require('./inlineSuggestionsController');
 const { AgentController } = require('./agent/AgentController');
+const { getConfig } = require('./config');
 
 function activate(context) {
   const output = vscode.window.createOutputChannel('llama.cpp Assistant');
@@ -35,7 +36,7 @@ function activate(context) {
     vscode.commands.registerCommand('llamaCpp.setWebSearchApiKey', () => agentController.setWebSearchApiKey()),
     vscode.commands.registerCommand('llamaCpp.clearWebSearchApiKey', () => agentController.clearWebSearchApiKey()),
     vscode.commands.registerCommand('llamaCpp.openInlineStatusMenu', () => inlineSuggestions.openMenu()),
-    vscode.commands.registerCommand('llamaCpp.askSelection', async () => { const editor = vscode.window.activeTextEditor; const hasSelection = editor && !editor.selection.isEmpty; const prompt = await vscode.window.showInputBox({ title: 'Ask llama.cpp', prompt: hasSelection ? 'Ask a question about the selected code.' : 'Ask a question about the active file.', ignoreFocusOut: true }); if (prompt) classicChat.open(prompt, { includeActiveFile: true }); }),
+    vscode.commands.registerCommand('llamaCpp.askSelection', async () => { const editor = vscode.window.activeTextEditor; const hasSelection = editor && !editor.selection.isEmpty; const prompt = await vscode.window.showInputBox({ title: 'Ask llama.cpp Assistant', prompt: hasSelection ? 'Ask a question about the selected code.' : 'Ask a question about the active file.', ignoreFocusOut: true }); if (prompt) classicChat.open(prompt, { includeActiveFile: true }); }),
     vscode.commands.registerCommand('llamaCpp.inlineEdit', () => editorActions.edit('edit')),
     vscode.commands.registerCommand('llamaCpp.fixSelection', () => editorActions.edit('fix')),
     vscode.commands.registerCommand('llamaCpp.refactorSelection', () => editorActions.edit('refactor')),
@@ -44,18 +45,49 @@ function activate(context) {
     vscode.commands.registerCommand('llamaCpp.manageProvider', () => manageProvider(client, nativeProvider)),
     vscode.commands.registerCommand('llamaCpp.setApiKey', async () => { await client.setApiKey(); nativeProvider.refresh(); }),
     vscode.commands.registerCommand('llamaCpp.clearApiKey', async () => { await client.clearApiKey(); nativeProvider.refresh(); }),
+    vscode.commands.registerCommand('llamaCpp.setOpenAIApiKey', async () => { await client.setOpenAIApiKey(); nativeProvider.refresh(); }),
+    vscode.commands.registerCommand('llamaCpp.clearOpenAIApiKey', async () => { await client.clearOpenAIApiKey(); nativeProvider.refresh(); }),
     vscode.commands.registerCommand('llamaCpp.setRagApiKey', () => client.setRagApiKey()),
     vscode.commands.registerCommand('llamaCpp.clearRagApiKey', () => client.clearRagApiKey()),
     vscode.commands.registerCommand('llamaCpp.showPerformanceMetrics', () => performance.showDetails()),
-    vscode.commands.registerCommand('llamaCpp.testConnection', async () => { try { const models = await client.testConnection(); nativeProvider.refresh(); const suffix = models.length ? ` Models: ${models.join(', ')}` : ''; vscode.window.showInformationMessage(`llama.cpp Assistant: connection OK.${suffix}`); } catch (error) { client.logError('connection', error); const message = error instanceof Error ? error.message : String(error); const choice = await vscode.window.showErrorMessage(`llama.cpp Assistant: ${message}`, 'Show Output'); if (choice === 'Show Output') output.show(true); } }),
+    vscode.commands.registerCommand('llamaCpp.testConnection', async () => { try { const models = await client.testConnection(); nativeProvider.refresh(); const suffix = models.length ? ` Models: ${models.slice(0, 12).join(', ')}` : ''; vscode.window.showInformationMessage(`llama.cpp Assistant: ${providerLabel()} connection OK.${suffix}`); } catch (error) { client.logError('connection', error); const message = error instanceof Error ? error.message : String(error); const choice = await vscode.window.showErrorMessage(`llama.cpp Assistant: ${message}`, 'Show Output'); if (choice === 'Show Output') output.show(true); } }),
     vscode.commands.registerCommand('llamaCpp.triggerCompletion', () => vscode.commands.executeCommand('editor.action.inlineSuggest.trigger')),
     vscode.commands.registerCommand('llamaCpp.reindexWorkspace', async () => { try { const result = await workspaceIndex.reindex(true); vscode.window.showInformationMessage(`llama.cpp RAG: indexed ${result.files} files / ${result.chunks} chunks / ${result.vectors} vectors.`); } catch (error) { vscode.window.showErrorMessage(`llama.cpp RAG: ${error instanceof Error ? error.message : String(error)}`); } }),
     vscode.commands.registerCommand('llamaCpp.showIndexStatus', () => { const status = workspaceIndex.status(); const when = status.indexedAt ? ` Last index: ${status.indexedAt.toLocaleString()}.` : ''; const vectorNote = status.vectorError ? ' Vector fallback active.' : ''; vscode.window.showInformationMessage(`llama.cpp RAG: ${status.enabled ? 'enabled' : 'disabled'} (${status.strategy}), ${status.files} files / ${status.chunks} chunks / ${status.vectors} vectors.${when}${vectorNote}`); })
   );
-  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => { if (event.affectsConfiguration('llamaCpp.metrics.showStatusBar')) performance.refreshVisibility(); if (event.affectsConfiguration('llamaCpp.api') || event.affectsConfiguration('llamaCpp.mode') || event.affectsConfiguration('llamaCpp.local')) nativeProvider.refresh(); }));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+    if (event.affectsConfiguration('llamaCpp.metrics.showStatusBar')) performance.refreshVisibility();
+    if (event.affectsConfiguration('llamaCpp.provider') || event.affectsConfiguration('llamaCpp.openai') || event.affectsConfiguration('llamaCpp.api') || event.affectsConfiguration('llamaCpp.mode') || event.affectsConfiguration('llamaCpp.local')) nativeProvider.refresh();
+  }));
 }
+
 async function openNativeChat(classicChat) { try { const commands = await vscode.commands.getCommands(true); if (commands.includes('workbench.action.chat.open')) { await vscode.commands.executeCommand('workbench.action.chat.open', { query: '@llama ', isPartialQuery: true }); return; } } catch {} classicChat.open(); }
 async function openAgentChat(classicChat) { try { const commands = await vscode.commands.getCommands(true); if (commands.includes('workbench.action.chat.open')) { await vscode.commands.executeCommand('workbench.action.chat.open', { query: '@llama /agent ', isPartialQuery: true }); return; } } catch {} classicChat.open('Use the native Chat command @llama /agent to run autonomous workspace and web research tools.'); }
-async function manageProvider(client, nativeProvider) { const choice = await vscode.window.showQuickPick([{ label: '$(key) Set API key', value: 'key' },{ label: '$(plug) Test connection and refresh models', value: 'test' },{ label: '$(settings-gear) Open llama.cpp Assistant settings', value: 'settings' },{ label: '$(comment-discussion) Open native Chat', value: 'chat' }], { title: 'llama.cpp model provider' }); if (!choice) return; if (choice.value === 'key') { await client.setApiKey(); nativeProvider.refresh(); } else if (choice.value === 'test') { await client.testConnection(); nativeProvider.refresh(); vscode.window.showInformationMessage('llama.cpp models refreshed.'); } else if (choice.value === 'settings') await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:local.llama-cpp-assistant'); else if (choice.value === 'chat') await openNativeChat({ open() {} }); }
+
+async function manageProvider(client, nativeProvider) {
+  const config = getConfig();
+  const current = config.provider === 'openai' ? 'OpenAI' : 'llama.cpp';
+  const choice = await vscode.window.showQuickPick([
+    { label: `$(server) Use llama.cpp${config.provider === 'llamacpp' ? ' • current' : ''}`, value: 'provider:llamacpp' },
+    { label: `$(cloud) Use OpenAI API${config.provider === 'openai' ? ' • current' : ''}`, value: 'provider:openai' },
+    { label: '$(key) Set llama.cpp/API-compatible key', value: 'llama-key' },
+    { label: '$(key) Set OpenAI API key', value: 'openai-key' },
+    { label: '$(plug) Test current provider connection', value: 'test' },
+    { label: '$(settings-gear) Open assistant settings', value: 'settings' },
+    { label: '$(comment-discussion) Open native Chat', value: 'chat' }
+  ], { title: `AI model provider — current: ${current}` });
+  if (!choice) return;
+  if (choice.value.startsWith('provider:')) {
+    const provider = choice.value.split(':')[1];
+    await vscode.workspace.getConfiguration('llamaCpp').update('provider', provider, vscode.ConfigurationTarget.Global);
+    nativeProvider.refresh();
+    vscode.window.showInformationMessage(`llama.cpp Assistant: provider changed to ${provider === 'openai' ? 'OpenAI' : 'llama.cpp'}.`);
+  } else if (choice.value === 'llama-key') { await client.setApiKey(); nativeProvider.refresh(); }
+  else if (choice.value === 'openai-key') { await client.setOpenAIApiKey(); nativeProvider.refresh(); }
+  else if (choice.value === 'test') { await client.testConnection(); nativeProvider.refresh(); vscode.window.showInformationMessage(`${providerLabel()} models refreshed.`); }
+  else if (choice.value === 'settings') await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:local.llama-cpp-assistant');
+  else if (choice.value === 'chat') await openNativeChat({ open() {} });
+}
+function providerLabel(){return getConfig().provider === 'openai' ? 'OpenAI' : 'llama.cpp';}
 function deactivate() {}
 module.exports = { activate, deactivate };
