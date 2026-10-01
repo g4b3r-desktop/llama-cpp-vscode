@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const { getConfig, configuredBaseUrl, endpointFromBase, llamaCppEndpoint, openAiEndpoint } = require('./config');
 const { requestJson, requestSse } = require('./http');
+const { OpenAIClient } = require('./openai/OpenAIClient');
 
 class LlamaClient {
   constructor(secrets, localServer, output) {
@@ -12,11 +13,14 @@ class LlamaClient {
     this.metricsEmitter = new vscode.EventEmitter();
     this.onMetrics = this.metricsEmitter.event;
     this.lastMetrics = undefined;
+    this.openai = new OpenAIClient(secrets, output, this);
   }
 
   dispose() { this.metricsEmitter.dispose(); }
-  async setApiKey() { await this.setSecret(this.apiKeySecret, 'llama.cpp Assistant API Key', 'API key saved.'); }
-  async clearApiKey() { await this.secrets.delete(this.apiKeySecret); vscode.window.showInformationMessage('llama.cpp Assistant: API key cleared.'); }
+  async setApiKey() { await this.setSecret(this.apiKeySecret, 'llama.cpp Assistant API Key', 'llama.cpp/API-compatible key saved.'); }
+  async clearApiKey() { await this.secrets.delete(this.apiKeySecret); vscode.window.showInformationMessage('llama.cpp Assistant: llama.cpp/API-compatible key cleared.'); }
+  async setOpenAIApiKey() { await this.openai.setApiKey(); }
+  async clearOpenAIApiKey() { await this.openai.clearApiKey(); }
   async setRagApiKey() { await this.setSecret(this.ragApiKeySecret, 'llama.cpp RAG API Key', 'RAG API key saved. It is used for custom embedding/reranker servers.'); }
   async clearRagApiKey() { await this.secrets.delete(this.ragApiKeySecret); vscode.window.showInformationMessage('llama.cpp Assistant: RAG API key cleared.'); }
 
@@ -28,8 +32,9 @@ class LlamaClient {
   }
 
   async listModels(signal) {
-    await this.ensureReady();
     const config = getConfig();
+    if (config.provider === 'openai') return this.openai.listModels(signal);
+    await this.ensureReady();
     const data = await requestJson(openAiEndpoint('/v1/models', config), { method: 'GET', headers: await this.headers() }, config.request.timeoutMs, signal);
     const discovered = (data?.data || []).map(x => x?.id).filter(Boolean);
     const configured = String(config.api.model || '').trim();
@@ -39,8 +44,9 @@ class LlamaClient {
   async testConnection() { return this.listModels(); }
 
   async complete(prefix, suffix, languageId, signal, extraFiles = [], options = {}) {
-    await this.ensureReady();
     const config = getConfig();
+    if (config.provider === 'openai') return this.openai.complete(prefix, suffix, languageId, signal, extraFiles, options);
+    await this.ensureReady();
     const startedAt = Date.now();
     const backend = config.autocomplete.backend === 'auto' ? (config.mode === 'local' ? 'fim' : 'openai') : config.autocomplete.backend;
     const maxTokens = Math.max(1, Number(options.maxTokens || config.autocomplete.maxTokens));
@@ -79,8 +85,9 @@ class LlamaClient {
   }
 
   async chat(messages, signal, options = {}) {
-    await this.ensureReady();
     const config = getConfig();
+    if (config.provider === 'openai') return this.openai.chat(messages, signal, options);
+    await this.ensureReady();
     const startedAt = Date.now();
     const body = this.chatBody(messages, false, config, options);
     const data = await requestJson(openAiEndpoint('/v1/chat/completions', config), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, config.request.timeoutMs, signal);
@@ -89,8 +96,9 @@ class LlamaClient {
   }
 
   async chatStream(messages, signal, onDelta, options = {}) {
-    await this.ensureReady();
     const config = getConfig();
+    if (config.provider === 'openai') return this.openai.chatStream(messages, signal, onDelta, options);
+    await this.ensureReady();
     const body = this.chatBody(messages, true, config, options);
     const startedAt = Date.now();
     let firstTokenAt;
@@ -158,6 +166,7 @@ class LlamaClient {
     const values = Array.isArray(inputs) ? inputs.map(String) : [String(inputs)];
     if (!values.length) return [];
     const customBase = String(config.rag.embedding.baseUrl || '').trim();
+    if (!customBase && config.provider === 'openai') return this.openai.embed(values, signal);
     if (!customBase) await this.ensureReady();
     const base = customBase || configuredBaseUrl(config);
     const body = { input: values };
@@ -175,6 +184,7 @@ class LlamaClient {
     const config = getConfig();
     if (!config.rag.rerank.enabled || !documents.length) return undefined;
     const customBase = String(config.rag.rerank.baseUrl || '').trim();
+    if (!customBase && config.provider === 'openai') return undefined;
     if (!customBase) await this.ensureReady();
     const base = customBase || configuredBaseUrl(config);
     const body = { query: String(query), documents: documents.map(String), top_n: Math.min(documents.length, Math.max(1, config.rag.rerank.candidates)) };
@@ -186,9 +196,9 @@ class LlamaClient {
     return normalized.length ? normalized : undefined;
   }
 
-  async ensureReady() { if (getConfig().mode === 'local') await this.localServer.ensureReady(); }
+  async ensureReady() { const config = getConfig(); if (config.provider !== 'openai' && config.mode === 'local') await this.localServer.ensureReady(); }
   async headers() { const apiKey = await this.secrets.get(this.apiKeySecret); return apiKey ? { Authorization: `Bearer ${apiKey}` } : {}; }
-  async ragHeaders() { const ragKey = await this.secrets.get(this.ragApiKeySecret); return ragKey ? { Authorization: `Bearer ${ragKey}` } : this.headers(); }
+  async ragHeaders() { const ragKey = await this.secrets.get(this.ragApiKeySecret); if (ragKey) return { Authorization: `Bearer ${ragKey}` }; return getConfig().provider === 'openai' ? {} : this.headers(); }
   logError(prefix, error) { const message = error instanceof Error ? (error.stack || error.message) : String(error); this.output.appendLine(`[${prefix}] ${message}`); }
 }
 
