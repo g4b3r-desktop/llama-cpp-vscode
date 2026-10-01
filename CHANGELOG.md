@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.1
+- Adicionada a configuração `llamaCpp.chat.includeHistory` para permitir inferências sem enviar o histórico anterior da conversa.
+- Adicionado o comando nativo `@llama /fresh` para ignorar o histórico somente naquela solicitação, preservando prompt atual, anexos e contexto/RAG configurados.
+- Adicionado ao Chat clássico o checkbox **Usar conversa anterior**, persistido na interface e aplicável por prompt.
+- O metadata do Chat clássico agora informa se histórico e arquivo atual foram incluídos na solicitação.
+- README totalmente revisado e traduzido para português, com instalação, llama.cpp, OpenAI, Agent Mode, pesquisa web, sugestões inline, RAG, segurança, troubleshooting e desenvolvimento.
+- Adicionada documentação específica para erros de janela de contexto do llama.cpp, incluindo uso de `/fresh`, `--ctx-size` e limites de contexto/RAG.
+
 ## 0.10.0
 - Added OpenAI as a first-class model provider alongside local/remote llama.cpp.
 - Added `llamaCpp.provider` with `llamacpp` and `openai` options plus a provider picker in **Llama.cpp: Manage Model Provider**.
