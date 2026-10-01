@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.9.0
+- Added controlled Agent Mode web tools: `web_search`, `fetch_url`, and `research_web`.
+- Added detailed multi-source research through native Chat with `@llama /research`.
+- Added Brave Search API support with a dedicated API key stored in VS Code SecretStorage.
+- Added configurable SearXNG JSON API support, including local/self-hosted instances.
+- Added `auto` web provider selection: Brave when a search key exists, otherwise SearXNG.
+- Added SSRF protections for fetched sources: HTTP(S)-only URLs, no embedded credentials, DNS validation, pinned validated IPs, redirect revalidation, and blocking of localhost/private/link-local/reserved/metadata addresses.
+- Added optional domain allowlists and blocklists plus result/source/character/timeout limits.
+- Web page contents are marked as untrusted data and the agent is instructed to ignore instructions or tool requests embedded in sources.
+- Detailed research asks the model to corroborate important claims and include source URLs in its final answer.
+- Increased the default tool-result context limit to 30,000 characters for multi-source research.
+- Added unit tests for URL/domain/IP safety rules.
+
 ## 0.8.0
 - Added autonomous local Agent Mode via `@llama /agent` and **Llama.cpp: Run Agent**.
 - Added a provider-agnostic `AgentModel` interface and llama.cpp tool-calling adapter.
