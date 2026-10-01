@@ -13,9 +13,10 @@ function registerNativeChat(context, client, workspaceIndex, agentController) {
     try {
       const command = request.command || '';
       const modelOverride = request.model?.vendor === VENDOR ? request.model.id : undefined;
-      if (command === 'agent') {
+      if (command === 'agent' || command === 'research') {
         const referenceContext = await resolveReferences(request.references || [], stream);
-        const agentPrompt = [request.prompt, referenceContext.blocks.length ? `Explicitly attached context:\n${referenceContext.blocks.join('\n\n')}` : ''].filter(Boolean).join('\n\n');
+        const researchInstruction = command === 'research' ? 'Perform detailed web research before answering. Use research_web or web_search + fetch_url, corroborate important claims when practical, and include the source URLs in the final answer.' : '';
+        const agentPrompt = [researchInstruction, request.prompt, referenceContext.blocks.length ? `Explicitly attached context:\n${referenceContext.blocks.join('\n\n')}` : ''].filter(Boolean).join('\n\n');
         const result = await agentController.run(agentPrompt, { model: modelOverride, signal: controller.signal, onAction: event => { if (typeof stream.progress === 'function') stream.progress(event.message); } });
         stream.markdown(result.answer || 'Tarefa concluída.');
         return { metadata: { command, model: modelOverride || getConfig().api.model || '', agentSessionId: result.sessionId, steps: result.steps } };
@@ -40,10 +41,10 @@ function registerNativeChat(context, client, workspaceIndex, agentController) {
   const participant = vscode.chat.createChatParticipant(PARTICIPANT_ID, handler);
   participant.iconPath = new vscode.ThemeIcon('sparkle');
   participant.followupProvider = { provideFollowups() { return [
+    { prompt: 'Pesquise este assunto na web, compare várias fontes e responda com links', command: 'research' },
     { prompt: 'Corrija os testes que estão falhando e valide a solução', command: 'agent' },
     { prompt: 'Explain the most important part of this code', command: 'explain' },
-    { prompt: 'Review this code for bugs and edge cases', command: 'review' },
-    { prompt: 'Suggest a safe refactor', command: 'refactor' }
+    { prompt: 'Review this code for bugs and edge cases', command: 'review' }
   ]; } };
   return participant;
 }
