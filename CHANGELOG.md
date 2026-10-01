@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0
+- Added OpenAI as a first-class model provider alongside local/remote llama.cpp.
+- Added `llamaCpp.provider` with `llamacpp` and `openai` options plus a provider picker in **Llama.cpp: Manage Model Provider**.
+- Added a dedicated OpenAI API key stored separately in VS Code SecretStorage.
+- Added OpenAI Responses API support for normal Chat, streaming Chat, editor actions, and Agent Mode.
+- Added OpenAI function calling support while preserving the application's controlled `ToolRegistry`; OpenAI never receives direct filesystem or terminal access.
+- Added OpenAI model discovery through `/v1/models` and integration with the VS Code model picker.
+- Added configurable OpenAI model, reasoning effort, API base URL, and response storage setting (`store` defaults to false).
+- Added optional OpenAI embeddings for hybrid RAG; disabled by default unless explicitly enabled.
+- Added optional OpenAI-powered inline autocomplete; disabled by default to avoid unexpected high-volume API usage/cost.
+- Added unit tests for Responses API message/tool conversion, response text extraction, and function-call extraction.
+- Existing llama.cpp local/API modes remain the default and continue to work unchanged.
+
 ## 0.9.0
 - Added controlled Agent Mode web tools: `web_search`, `fetch_url`, and `research_web`.
 - Added detailed multi-source research through native Chat with `@llama /research`.
