@@ -6,11 +6,12 @@
   const cancelButton = document.getElementById('cancel');
   const status = document.getElementById('status');
   const activeFileToggle = document.getElementById('include-active-file');
+  const historyToggle = document.getElementById('include-history');
   const activeFileName = document.getElementById('active-file-name');
   const activeFileWrap = document.getElementById('active-file-wrap');
   const assistantNodes = new Map();
   const savedState = vscode.getState() || {};
-  let hasInitializedToggle = false;
+  let hasInitializedToggles = false;
 
   function escapeHtml(value) {
     return String(value || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -85,30 +86,40 @@
   }
   function addAssistant(id) { const div=document.createElement('div'); div.className='msg assistant'; const body=document.createElement('div'); body.className='markdown-body'; div.appendChild(body); messages.appendChild(div); assistantNodes.set(id,{node:body,raw:''}); scrollToBottom(); }
   function updateToggleState(){ activeFileWrap.classList.toggle('disabled',activeFileToggle.disabled); }
-  function saveToggleState(){ vscode.setState({includeActiveFile:Boolean(activeFileToggle.checked)}); }
-  function send(){ const text=input.value.trim(); if(!text)return; vscode.postMessage({type:'ask',text,includeActiveFile:Boolean(activeFileToggle.checked&&!activeFileToggle.disabled)}); input.value=''; }
+  function saveToggleState(){ vscode.setState({includeActiveFile:Boolean(activeFileToggle.checked),includeHistory:Boolean(historyToggle.checked)}); }
+  function send(){ const text=input.value.trim(); if(!text)return; vscode.postMessage({type:'ask',text,includeActiveFile:Boolean(activeFileToggle.checked&&!activeFileToggle.disabled),includeHistory:Boolean(historyToggle.checked)}); input.value=''; }
 
   sendButton.addEventListener('click', send);
   cancelButton.addEventListener('click', () => vscode.postMessage({type:'cancel'}));
   document.getElementById('reindex').addEventListener('click', () => vscode.postMessage({type:'reindex'}));
   document.getElementById('clear').addEventListener('click', () => vscode.postMessage({type:'clear'}));
   activeFileToggle.addEventListener('change', saveToggleState);
+  historyToggle.addEventListener('change', saveToggleState);
   input.addEventListener('keydown', e => { if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); send(); } });
   messages.addEventListener('click', e => { const a=e.target.closest('a[data-external]'); if(!a)return; e.preventDefault(); vscode.postMessage({type:'openLink',url:a.getAttribute('data-external')||''}); });
 
   window.addEventListener('message', event => {
     const msg=event.data||{};
-    if(msg.type==='user') add('user',msg.text,false,msg.includeActiveFile&&msg.activeFilename?`Context: current file · ${msg.activeFilename}`:'Context: current file not attached');
+    if(msg.type==='user'){
+      const parts=[];
+      parts.push(msg.includeHistory?'Histórico: incluído':'Histórico: ignorado');
+      parts.push(msg.includeActiveFile&&msg.activeFilename?`arquivo atual: ${msg.activeFilename}`:'arquivo atual: não anexado');
+      add('user',msg.text,false,parts.join(' · '));
+    }
     if(msg.type==='assistantStart') addAssistant(msg.id);
     if(msg.type==='assistantDelta'){ const entry=assistantNodes.get(msg.id); if(entry){ entry.raw+=msg.text||''; entry.node.innerHTML=renderMarkdown(entry.raw); scrollToBottom(); } }
     if(msg.type==='assistantDone') assistantNodes.delete(msg.id);
     if(msg.type==='error') add('error',msg.text||'',false);
     if(msg.type==='notice') add('notice',msg.text||'',false);
-    if(msg.type==='busy'){ status.textContent=msg.value?'Generating…':''; sendButton.disabled=Boolean(msg.value); cancelButton.disabled=!msg.value; }
+    if(msg.type==='busy'){ status.textContent=msg.value?'Gerando…':''; sendButton.disabled=Boolean(msg.value); cancelButton.disabled=!msg.value; }
     if(msg.type==='cleared'){ messages.textContent=''; assistantNodes.clear(); }
     if(msg.type==='editorState'){
-      const hasFile=Boolean(msg.hasFile); activeFileName.textContent=hasFile?msg.filename:'No active file'; activeFileName.title=hasFile?msg.filename:''; activeFileToggle.disabled=!hasFile;
-      if(!hasInitializedToggle){ activeFileToggle.checked=hasFile&&(typeof savedState.includeActiveFile==='boolean'?savedState.includeActiveFile:Boolean(msg.defaultIncludeActiveFile)); hasInitializedToggle=true; }
+      const hasFile=Boolean(msg.hasFile); activeFileName.textContent=hasFile?msg.filename:'Nenhum arquivo ativo'; activeFileName.title=hasFile?msg.filename:''; activeFileToggle.disabled=!hasFile;
+      if(!hasInitializedToggles){
+        activeFileToggle.checked=hasFile&&(typeof savedState.includeActiveFile==='boolean'?savedState.includeActiveFile:Boolean(msg.defaultIncludeActiveFile));
+        historyToggle.checked=typeof savedState.includeHistory==='boolean'?savedState.includeHistory:Boolean(msg.defaultIncludeHistory);
+        hasInitializedToggles=true;
+      }
       updateToggleState();
     }
   });
