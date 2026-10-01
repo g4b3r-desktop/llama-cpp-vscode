@@ -19,7 +19,7 @@ function registerNativeChat(context, client, workspaceIndex, agentController) {
         const agentPrompt = [researchInstruction, request.prompt, referenceContext.blocks.length ? `Explicitly attached context:\n${referenceContext.blocks.join('\n\n')}` : ''].filter(Boolean).join('\n\n');
         const result = await agentController.run(agentPrompt, { model: modelOverride, signal: controller.signal, onAction: event => { if (typeof stream.progress === 'function') stream.progress(event.message); } });
         stream.markdown(result.answer || 'Tarefa concluída.');
-        return { metadata: { command, model: modelOverride || getConfig().api.model || '', agentSessionId: result.sessionId, steps: result.steps } };
+        return { metadata: { command, model: modelOverride || defaultModel(), agentSessionId: result.sessionId, steps: result.steps } };
       }
       const commandPrompt = commandInstruction(command);
       const referenceContext = await resolveReferences(request.references || [], stream);
@@ -31,7 +31,7 @@ function registerNativeChat(context, client, workspaceIndex, agentController) {
         { role: 'user', content: [request.prompt, referenceContext.blocks.join('\n\n'), autoContext.text].filter(Boolean).join('\n\n') }
       ];
       const answer = await client.chatStream(messages, controller.signal, delta => stream.markdown(delta), { model: modelOverride });
-      return { metadata: { command, model: modelOverride || getConfig().api.model || '', answerLength: answer.length, references: referenceContext.labels } };
+      return { metadata: { command, model: modelOverride || defaultModel(), answerLength: answer.length, references: referenceContext.labels } };
     } catch (error) {
       if (controller.signal.aborted) return;
       client.logError('native chat', error);
@@ -54,6 +54,7 @@ async function resolveReferences(references, stream) {
   for(const reference of references){if(remaining<=0)break;const value=reference?.value;let uri;let range;if(value instanceof vscode.Uri)uri=value;else if(value instanceof vscode.Location){uri=value.uri;range=value.range;}if(!uri||uri.scheme!=='file')continue;try{const doc=await vscode.workspace.openTextDocument(uri);let text=range?doc.getText(range):doc.getText();text=text.slice(0,remaining);remaining-=text.length;const label=vscode.workspace.asRelativePath(uri,true);labels.push(label);blocks.push(`<attached_context file="${escapeAttr(label)}" language="${escapeAttr(doc.languageId)}">\n${text}\n</attached_context>`);if(typeof stream.reference==='function')stream.reference(range?new vscode.Location(uri,range):uri);}catch{}}
   return{blocks,labels};
 }
+function defaultModel(){const config=getConfig();return String(config.provider==='openai'?config.openai.model:config.api.model||'');}
 function historyMessages(history){const out=[];for(const turn of history.slice(-10)){if(turn&&typeof turn.prompt==='string'){out.push({role:'user',content:turn.prompt});continue;}if(turn?.response&&Array.isArray(turn.response)){const text=turn.response.map(part=>{const value=part?.value;if(typeof value==='string')return value;if(typeof value?.value==='string')return value.value;return '';}).join('');if(text)out.push({role:'assistant',content:text});}}return out;}
 function commandInstruction(command){const commands={explain:'Explain the relevant code clearly, including data flow and important edge cases.',fix:'Find the bug or defect and propose the smallest safe fix. Show changed code when useful.',review:'Perform a code review focused on correctness, security, maintainability, and performance. Prioritize concrete findings.',tests:'Generate focused tests for the supplied code, covering happy paths, edge cases, and failure cases.',refactor:'Propose a behavior-preserving refactor. Prefer small, reviewable changes and explain tradeoffs.',codebase:'Use workspace context aggressively to answer as a codebase-aware assistant.'};return commands[command]||'';}
 function escapeAttr(value){return String(value).replace(/[&"<>]/g,char=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[char]));}
