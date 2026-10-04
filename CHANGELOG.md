@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.0
+- Adicionado `ContextBudgetManager` compartilhado por Chat e Agent Mode para impedir requisições maiores que a janela de contexto disponível.
+- O provider llama.cpp agora tenta detectar automaticamente `n_ctx` por `GET /props` e usa `--ctx-size`/fallback configurável quando a detecção não está disponível.
+- Quando suportado pelo llama-server, a extensão usa `/v1/chat/completions/input_tokens` para medir o prompt real antes da inferência; versões antigas usam uma estimativa conservadora.
+- O Chat remove primeiro turnos antigos, depois reduz apenas contexto automático/RAG/anexos no final do prompt e preserva a solicitação atual do usuário.
+- O Agent Mode compacta resultados grandes de ferramentas e pode descartar ciclos antigos completos sem separar `tool_call` do respectivo resultado.
+- A reserva de saída só é reduzida depois da compactação do contexto opcional, respeitando `llamaCpp.context.minOutputTokens`.
+- Se system prompt + prompt essencial + schemas de ferramentas ainda não couberem, a extensão retorna um erro claro em vez de enviar uma requisição inválida ao provider.
+- Adicionadas configurações `llamaCpp.context.*` para override de janela, fallbacks por provider, margem de segurança, saída mínima e estimativa de caracteres por token.
+- Adicionados testes unitários para descoberta de `n_ctx`, orçamento com schemas de ferramentas, remoção de histórico, redução de RAG/anexos, compactação de resultados do agente e rejeição segura de prompts essenciais grandes demais.
+- `npm run check` agora também valida `src/context/ContextBudgetManager.js` e `src/terminal/commandPolicy.js`.
+
 ## 0.10.1
 - Adicionada a configuração `llamaCpp.chat.includeHistory` para permitir inferências sem enviar o histórico anterior da conversa.
 - Adicionado o comando nativo `@llama /fresh` para ignorar o histórico somente naquela solicitação, preservando prompt atual, anexos e contexto/RAG configurados.
