@@ -1,19 +1,21 @@
 # llama.cpp Assistant para VS Code
 
-Extensão para transformar o VS Code em um assistente de programação com suporte a **llama.cpp local/remoto** e à **API da OpenAI**. O projeto reúne Chat nativo, Agent Mode, pesquisa web controlada, sugestões inline, ações de edição, RAG, métricas de desempenho e controles semelhantes aos fluxos do GitHub Copilot.
+Extensão para transformar o VS Code em um assistente de programação com suporte a **llama.cpp local/remoto** e à **API da OpenAI**. O projeto reúne Chat nativo, Agent Mode, pesquisa web controlada, sugestões inline, ações de edição, RAG, rollback, métricas de desempenho e gerenciamento automático da janela de contexto.
 
 ## Principais recursos
 
 - Chat nativo do VS Code com `@llama`.
 - Provider alternável entre `llama.cpp` e OpenAI.
+- **Context Budget Manager** para impedir prompts maiores que a janela disponível.
+- Detecção automática de `n_ctx` em servidores llama.cpp atuais.
 - Agent Mode com ferramentas controladas para arquivos, buscas, diagnósticos e terminal.
 - Pesquisa detalhada na internet com Brave Search ou SearXNG.
+- Modo `/fresh` para inferência sem histórico anterior.
 - Sugestões inline por linguagem/tipo de arquivo.
 - Edição, correção, refatoração, revisão e geração de testes.
 - RAG com BM25, embeddings, busca híbrida e reranking opcional.
-- Diff antes de alterações importantes, backups e rollback do agente.
+- Diff, backups e rollback de sessões do agente.
 - Métricas de TTFT, tokens/s e cache quando o backend fornece esses dados.
-- Modo de **inferência sem histórico anterior** para reduzir contexto e obter uma resposta independente da conversa anterior.
 
 ## Requisitos
 
@@ -24,18 +26,18 @@ Extensão para transformar o VS Code em um assistente de programação com supor
 
 ## Instalação
 
-Baixe o arquivo `.vsix` da versão mais recente em **Releases** e instale pelo VS Code:
+Baixe o `.vsix` da versão mais recente em **Releases** e instale pelo VS Code:
 
 1. Abra a Command Palette com `Ctrl+Shift+P`.
 2. Execute **Extensions: Install from VSIX...**.
 3. Selecione `llama-cpp-assistant-<versão>.vsix`.
 4. Execute **Developer: Reload Window** se necessário.
 
-Para desenvolvimento, abra este repositório e use `Ctrl+F5` para iniciar um Extension Development Host sem pausar na primeira linha. `F5` inicia uma sessão de depuração e pode parar o Extension Host aguardando o debugger.
+Para desenvolvimento, use `Ctrl+F5` para iniciar um Extension Development Host sem pausar na primeira linha. `F5` inicia depuração e pode deixar o Extension Host parado aguardando o debugger.
 
 ---
 
-## Escolhendo o provider de IA
+## Escolhendo o provider
 
 Execute:
 
@@ -43,12 +45,12 @@ Execute:
 Llama.cpp: Manage Model Provider
 ```
 
-Você pode escolher:
+Opções:
 
-- **Use llama.cpp** — modelo local ou endpoint OpenAI-compatible baseado em llama.cpp.
+- **Use llama.cpp** — servidor local ou endpoint remoto OpenAI-compatible baseado em llama.cpp.
 - **Use OpenAI API** — usa a Responses API da OpenAI.
 
-A opção também pode ser definida no `settings.json`:
+Também pode configurar diretamente:
 
 ```json
 {
@@ -62,6 +64,111 @@ ou:
 {
   "llamaCpp.provider": "openai"
 }
+```
+
+---
+
+# Context Budget Manager
+
+A partir da **v0.11.0**, Chat e Agent Mode passam por um gerenciador de orçamento antes de cada inferência.
+
+O objetivo é impedir erros como:
+
+```text
+request (5673 tokens) exceeds the available context size (4096 tokens)
+```
+
+Em servidores llama.cpp atuais, a extensão tenta descobrir automaticamente `n_ctx` através de `/props`. Quando o servidor também oferece contagem de tokens para Chat Completions, o plugin usa essa contagem antes de enviar a inferência. Em versões antigas, usa um fallback configurável e uma estimativa conservadora.
+
+Para OpenAI, a extensão usa uma janela configurável localmente para montar o orçamento. Isso é um limite de segurança da extensão e deve ser ajustado de acordo com o modelo escolhido.
+
+## Ordem de prioridade do contexto
+
+O plugin preserva primeiro o que é essencial:
+
+```text
+system prompt / regras do agente
+        ↓
+pedido atual do usuário
+        ↓
+schemas das ferramentas
+        ↓
+contexto opcional restante
+```
+
+Quando a solicitação está grande demais, o gerenciador tenta nesta ordem:
+
+1. remover turnos antigos do Chat;
+2. compactar resultados antigos e grandes de ferramentas do agente;
+3. remover ciclos antigos completos do Agent Mode sem separar `tool_call` do respectivo resultado;
+4. reduzir o final do contexto automático, RAG e anexos, mantendo o prompt atual;
+5. reduzir o resumo inicial do workspace do agente;
+6. diminuir a reserva de saída até `llamaCpp.context.minOutputTokens`;
+7. se ainda não couber, retornar um erro claro **antes** de chamar o provider.
+
+A extensão não deve cortar silenciosamente o texto essencial digitado pelo usuário apenas para forçar o prompt a caber.
+
+## Configuração do orçamento
+
+```json
+{
+  "llamaCpp.context.enabled": true,
+  "llamaCpp.context.windowTokens": 0,
+  "llamaCpp.context.llamaCppFallbackTokens": 4096,
+  "llamaCpp.context.openAIContextWindowTokens": 128000,
+  "llamaCpp.context.safetyMarginTokens": 128,
+  "llamaCpp.context.minOutputTokens": 256,
+  "llamaCpp.context.charactersPerToken": 3
+}
+```
+
+### `llamaCpp.context.windowTokens`
+
+Override manual da janela. `0` significa automático/fallback.
+
+Exemplo para forçar 8192:
+
+```json
+{
+  "llamaCpp.context.windowTokens": 8192
+}
+```
+
+### `llamaCpp.context.llamaCppFallbackTokens`
+
+Usado quando um servidor llama.cpp não expõe a janela de contexto e ela não pode ser inferida da configuração local.
+
+### `llamaCpp.context.openAIContextWindowTokens`
+
+Limite usado pelo gerenciador para o provider OpenAI. Ajuste para o modelo utilizado se necessário.
+
+### `llamaCpp.context.safetyMarginTokens`
+
+Reserva para diferenças de tokenização/chat template e overhead do backend.
+
+### `llamaCpp.context.minOutputTokens`
+
+Quantidade mínima que o gerenciador tenta preservar para a resposta ou para a próxima decisão do agente.
+
+### Exemplo: servidor com 4096 tokens
+
+Com:
+
+```json
+{
+  "llamaCpp.local.args": ["--ctx-size", "4096"],
+  "llamaCpp.chat.maxTokens": 1024,
+  "llamaCpp.context.safetyMarginTokens": 128,
+  "llamaCpp.context.minOutputTokens": 256
+}
+```
+
+o gerenciador tenta montar cada chamada respeitando os 4096 tokens. Se o histórico crescer, mensagens antigas são removidas antes de reduzir o contexto do pedido atual.
+
+O comando `/fresh` continua útil para começar imediatamente sem histórico:
+
+```text
+@llama /fresh analise este erro
 ```
 
 ---
@@ -82,22 +189,20 @@ Exemplo:
 }
 ```
 
-Argumentos adicionais são enviados para o `llama-server` por `llamaCpp.local.args`.
-
-Exemplo com contexto de 8192 tokens:
+Argumentos adicionais são enviados por `llamaCpp.local.args`:
 
 ```json
 {
   "llamaCpp.local.args": [
-    "--ctx-size",
-    "8192"
+    "--ctx-size", "8192",
+    "--flash-attn", "on"
   ]
 }
 ```
 
 Use um tamanho compatível com o modelo e com a memória disponível.
 
-### Conectando a um llama.cpp remoto
+### llama.cpp remoto
 
 ```json
 {
@@ -108,26 +213,26 @@ Use um tamanho compatível com o modelo e com a memória disponível.
 }
 ```
 
-Se o endpoint exigir chave, execute:
+Se o endpoint exigir chave:
 
 ```text
 Llama.cpp: Set llama.cpp/API Key
 ```
 
-A chave é armazenada no SecretStorage do VS Code.
+A chave fica no SecretStorage do VS Code.
 
 ---
 
-## Configurando a API da OpenAI
+## Configurando OpenAI
 
 1. Execute **Llama.cpp: Manage Model Provider**.
 2. Escolha **Use OpenAI API**.
 3. Execute **Llama.cpp: Set OpenAI API Key**.
-4. Cole sua chave da API.
+4. Cole a chave da API.
 
-A chave fica no **VS Code SecretStorage** e não no `settings.json`.
+A chave é armazenada no **VS Code SecretStorage**, não no `settings.json`.
 
-Configuração equivalente:
+Exemplo:
 
 ```json
 {
@@ -135,22 +240,16 @@ Configuração equivalente:
   "llamaCpp.openai.baseUrl": "https://api.openai.com/v1",
   "llamaCpp.openai.model": "gpt-5.6-luna",
   "llamaCpp.openai.reasoningEffort": "low",
-  "llamaCpp.openai.store": false
+  "llamaCpp.openai.store": false,
+  "llamaCpp.context.openAIContextWindowTokens": 128000
 }
 ```
 
-O provider OpenAI é usado por:
+O provider OpenAI pode ser usado por Chat, Agent Mode, function calling, pesquisa controlada e ações de edição.
 
-- Chat normal e streaming;
-- Agent Mode;
-- function calling do agente;
-- pesquisa detalhada via ferramentas da extensão;
-- ações de edição/revisão/refatoração/testes;
-- seleção de modelos pelo model picker do VS Code.
+### Controle de custos
 
-### Controle de custos com OpenAI
-
-Autocomplete e embeddings via OpenAI ficam desligados por padrão:
+Autocomplete e embeddings por OpenAI ficam desligados por padrão:
 
 ```json
 {
@@ -160,19 +259,17 @@ Autocomplete e embeddings via OpenAI ficam desligados por padrão:
 }
 ```
 
-Isso evita chamadas pagas frequentes enquanto você digita ou indexa muitos arquivos.
-
 ---
 
-## Chat nativo
+# Chat
 
-Abra com:
+Abra:
 
 ```text
 Llama.cpp: Open Native Chat
 ```
 
-Depois use:
+Uso normal:
 
 ```text
 @llama explique este código
@@ -192,19 +289,15 @@ Comandos disponíveis:
 @llama /codebase
 ```
 
-### Inferência sem usar a conversa anterior
-
-A versão `0.10.1` adiciona uma forma explícita de responder sem enviar o histórico anterior ao modelo.
-
-No Chat nativo:
+## Inferência sem histórico
 
 ```text
 @llama /fresh explique esta função sem considerar nossa conversa anterior
 ```
 
-`/fresh` ignora as mensagens anteriores **somente nessa inferência**. Arquivos anexados com **Add Context**, arquivo atual/RAG automático e o prompt atual continuam podendo ser enviados normalmente.
+`/fresh` ignora as mensagens anteriores somente nessa inferência. Anexos explícitos, arquivo atual e RAG continuam independentes.
 
-Também existe a configuração global:
+Globalmente:
 
 ```json
 {
@@ -212,70 +305,19 @@ Também existe a configuração global:
 }
 ```
 
-Com `false`, solicitações normais de Chat não enviam os turnos anteriores. Para voltar ao comportamento tradicional:
+No Chat clássico existe o checkbox **Usar conversa anterior** para alterar isso por solicitação.
 
-```json
-{
-  "llamaCpp.chat.includeHistory": true
-}
-```
+## Arquivo atual e contexto explícito
 
-No Chat clássico há um checkbox **Usar conversa anterior**. Ele permite alterar esse comportamento a cada prompt sem modificar permanentemente o `settings.json`.
+No Chat clássico, **Arquivo atual** controla o envio automático do arquivo/seleção ativa e editores visíveis.
 
-> Desativar o histórico reduz o contexto, mas não desativa automaticamente arquivo atual, anexos ou RAG. Esses mecanismos são independentes.
+No Chat nativo, use **Add Context** para anexar arquivos ou seleções explicitamente.
 
-### Controle de arquivo atual
-
-No Chat clássico, o checkbox **Arquivo atual** controla o envio automático do arquivo/seleção ativa e editores visíveis.
-
-Quando desligado:
-
-- arquivo atual não é anexado automaticamente;
-- editores visíveis não são anexados automaticamente;
-- referências explícitas `@arquivo` continuam funcionando;
-- o RAG evita recolocar automaticamente os arquivos visíveis que foram excluídos desse modo.
-
-No Chat nativo, use **Add Context** para anexar arquivos e seleções explicitamente.
+Referências `@arquivo` continuam disponíveis no Chat clássico.
 
 ---
 
-## Contexto e erro "request exceeds the available context size"
-
-Se o `llama-server` mostrar algo como:
-
-```text
-request (5673 tokens) exceeds the available context size (4096 tokens)
-```
-
-significa que a soma de instruções + histórico + código + RAG + anexos ultrapassou a janela de contexto configurada no servidor.
-
-As principais soluções são:
-
-1. usar `/fresh` ou desligar `llamaCpp.chat.includeHistory`;
-2. aumentar `--ctx-size` se o modelo suportar;
-3. reduzir o contexto automático do Chat;
-4. reduzir `rag.topK`;
-5. anexar menos arquivos grandes.
-
-Exemplo conservador para um servidor com apenas 4096 tokens:
-
-```json
-{
-  "llamaCpp.chat.includeHistory": false,
-  "llamaCpp.chat.maxTokens": 768,
-  "llamaCpp.chat.maxContextCharacters": 9000,
-  "llamaCpp.chat.workspaceContextCharacters": 6000,
-  "llamaCpp.chat.maxVisibleContextCharacters": 5000,
-  "llamaCpp.chat.mentionedFilesMaxCharacters": 8000,
-  "llamaCpp.rag.topK": 3
-}
-```
-
-Esses limites usam caracteres como aproximação em várias partes da extensão; o tokenizador real depende do modelo. Se continuar excedendo, reduza mais os valores ou aumente a janela do servidor.
-
----
-
-## Agent Mode
+# Agent Mode
 
 Use:
 
@@ -283,25 +325,25 @@ Use:
 @llama /agent corrija os testes que estão falhando e valide a solução
 ```
 
-O agente funciona em loop controlado:
+Fluxo:
 
 ```text
-Pedido do usuário
-↓
-Modelo escolhe uma ferramenta
-↓
-A extensão valida e executa a ferramenta
-↓
-Resultado volta para o modelo
-↓
-Modelo escolhe a próxima ação
-↓
-Repete até concluir ou atingir o limite de passos
+Pedido
+  ↓
+LLM solicita uma ferramenta
+  ↓
+Tool Host valida permissões/parâmetros
+  ↓
+Extensão executa
+  ↓
+Resultado volta ao modelo
+  ↓
+Próxima decisão
 ```
 
-O LLM **não recebe acesso direto** ao sistema de arquivos, terminal ou socket de rede.
+O LLM **não recebe acesso direto** ao filesystem, terminal ou socket de rede.
 
-### Ferramentas do workspace
+## Ferramentas principais
 
 - `list_directory`
 - `search_files`
@@ -315,20 +357,25 @@ O LLM **não recebe acesso direto** ao sistema de arquivos, terminal ou socket d
 - `move_file`
 - `run_terminal`
 - `get_errors`
+- `web_search`
+- `fetch_url`
+- `research_web`
 
-### Proteções do agente
+## Proteções
 
-- caminhos precisam ficar dentro da raiz do workspace;
-- caminhos absolutos e traversal `..` são rejeitados;
-- symlinks são verificados para impedir escape do projeto;
-- operações perigosas exigem Workspace Trust e/ou confirmação;
-- arquivos existentes precisam ser lidos antes de editar/mover/excluir;
-- SHA-256 detecta alteração externa antes de sobrescrever;
-- backups são mantidos por sessão;
-- alterações retornam diff;
-- a última sessão pode ser revertida;
-- terminal possui timeout e limite de saída;
-- número de passos do agente é limitado.
+- caminhos restritos ao workspace;
+- bloqueio de caminhos absolutos e traversal `..`;
+- verificação de symlinks;
+- Workspace Trust para operações sensíveis;
+- leitura obrigatória antes de alterar/mover/excluir arquivos existentes;
+- SHA-256 para detectar modificações externas;
+- confirmação para operações perigosas;
+- backup por sessão;
+- diff das alterações;
+- rollback da última sessão;
+- timeout e limite de saída do terminal;
+- limite máximo de passos;
+- orçamento de contexto em cada iteração.
 
 Rollback:
 
@@ -336,7 +383,7 @@ Rollback:
 Llama.cpp: Roll Back Last Agent Changes
 ```
 
-Configuração principal:
+Configuração:
 
 ```json
 {
@@ -351,28 +398,17 @@ Configuração principal:
 }
 ```
 
-A interface mostra apenas ações executadas, por exemplo:
-
-```text
-Procurando arquivos...
-Lendo src/app.js...
-Alterando src/app.js...
-Executando testes...
-Analisando erros...
-Tarefa concluída.
-```
-
-O raciocínio privado do modelo não é exibido.
+Em janelas pequenas, o Context Budget Manager pode compactar resultados antigos de `read_file`, terminal, web e outras ferramentas antes da próxima decisão do modelo.
 
 ---
 
-## Pesquisa detalhada na internet
+# Pesquisa detalhada na internet
 
-O Agent Mode pode usar ferramentas controladas:
+Ferramentas:
 
 - `web_search` — encontra resultados e snippets;
 - `fetch_url` — lê uma fonte HTTP(S) específica;
-- `research_web` — pesquisa, diversifica domínios e lê múltiplas fontes.
+- `research_web` — pesquisa e lê múltiplas fontes.
 
 Exemplo:
 
@@ -380,23 +416,19 @@ Exemplo:
 @llama /research pesquise as mudanças mais recentes do llama.cpp server e responda com as fontes
 ```
 
-Ou dentro do agente:
+Ou:
 
 ```text
 @llama /agent pesquise a documentação atual da biblioteca usada neste projeto, compare com nosso código, atualize o necessário e execute os testes
 ```
 
-### Brave Search
-
-Execute:
+## Brave Search
 
 ```text
 Llama.cpp: Set Web Search API Key
 ```
 
-A chave fica no SecretStorage.
-
-### SearXNG
+## SearXNG
 
 ```json
 {
@@ -405,7 +437,7 @@ A chave fica no SecretStorage.
 }
 ```
 
-Configuração completa típica:
+Configuração típica:
 
 ```json
 {
@@ -421,33 +453,31 @@ Configuração completa típica:
 }
 ```
 
-### Segurança da pesquisa web
+## Segurança da web
 
-A extensão controla a rede e aplica proteções como:
+A extensão controla a rede e aplica, entre outras proteções:
 
-- HTTP(S) apenas;
-- rejeição de credenciais embutidas na URL;
+- somente HTTP(S);
+- rejeição de credenciais embutidas em URL;
 - validação de DNS;
 - revalidação de redirects;
-- bloqueio de localhost, redes privadas, link-local, reservadas e hosts comuns de metadata;
-- allowlist/blocklist opcionais de domínios;
-- conteúdo web marcado como dado externo não confiável.
-
-O modelo é instruído a não obedecer comandos encontrados dentro das páginas pesquisadas.
+- bloqueio de localhost/redes privadas/link-local/reservadas/metadata;
+- allowlist/blocklist opcionais;
+- páginas tratadas como **dados externos não confiáveis**.
 
 ---
 
-## Sugestões inline
+# Sugestões inline
 
-A Status Bar possui um menu no estilo de controle do Copilot para:
+A Status Bar permite:
 
 - ativar/desativar sugestões globalmente;
-- ativar/desativar por linguagem do arquivo atual;
-- remover override da linguagem;
+- ativar/desativar por linguagem;
+- remover override;
 - Snooze por 5, 15 ou 30 minutos;
 - retomar sugestões;
-- disparar autocomplete manualmente;
-- abrir Chat, métricas e configurações.
+- disparar autocomplete;
+- abrir Chat/configurações/métricas.
 
 Exemplo:
 
@@ -465,22 +495,13 @@ Exemplo:
 }
 ```
 
-Para llama.cpp, autocomplete pode usar FIM `/infill` ou endpoint OpenAI-compatible `/v1/completions`.
-
-```json
-{
-  "llamaCpp.autocomplete.profile": "fast",
-  "llamaCpp.autocomplete.maxTokens": 48,
-  "llamaCpp.autocomplete.maxPredictMs": 1200,
-  "llamaCpp.autocomplete.relatedFilesTopK": 1
-}
-```
+Para llama.cpp, autocomplete pode usar `/infill` ou `/v1/completions`.
 
 ---
 
-## RAG do workspace
+# RAG do workspace
 
-O RAG suporta:
+Suporta:
 
 - BM25;
 - embeddings;
@@ -489,7 +510,7 @@ O RAG suporta:
 - reranking opcional;
 - cache persistente;
 - `@file` explícito;
-- exclusão de diretórios comuns como `.git`, `node_modules`, `dist`, `build`, `venv`, `target` e outros.
+- exclusão de diretórios comuns de build/dependências.
 
 Exemplo:
 
@@ -503,28 +524,79 @@ Exemplo:
 }
 ```
 
-OpenAI embeddings são opcionais e podem ser usados mesmo com outro provider de Chat, se explicitamente habilitados.
+O Context Budget Manager atua **depois** da recuperação: se o RAG trouxer mais texto do que cabe no prompt, o material de menor prioridade no final da solicitação é reduzido antes da inferência.
 
 ---
 
-## Métricas de desempenho
+# Métricas
 
-Quando o backend fornece dados suficientes, o indicador mostra:
+Quando o backend fornece dados suficientes, o indicador pode mostrar:
 
-- TTFT — tempo até o primeiro token;
-- velocidade de processamento do prompt;
-- velocidade de geração;
-- tokens reutilizados pelo prompt cache.
+- TTFT;
+- prompt tokens/s;
+- geração tokens/s;
+- prompt cache.
 
-Abra os detalhes com:
+Abra:
 
 ```text
 Llama.cpp: Show Performance Metrics
 ```
 
+O Output Channel `llama.cpp Assistant` também registra linhas como:
+
+```text
+[context:chat] n_ctx=4096 input=2310/2944 output=1024 source=llama.cpp /props trimmed=true
+```
+
+Isso ajuda a diagnosticar quanto contexto foi mantido e qual limite foi detectado.
+
 ---
 
-## Comandos úteis
+# Troubleshooting
+
+## `request (...) exceeds the available context size`
+
+Na v0.11.0, esse erro deve ser evitado no Chat/Agent Mode pelo orçamento automático.
+
+Se ainda ocorrer:
+
+1. confirme que `llamaCpp.context.enabled` está `true`;
+2. confira o valor de `n_ctx` no Output Channel;
+3. use `llamaCpp.context.windowTokens` se o servidor reportar um limite incorreto;
+4. aumente `--ctx-size` se o modelo/hardware permitirem;
+5. use `/fresh` para eliminar histórico imediatamente;
+6. reduza RAG/anexos em modelos com contexto muito pequeno.
+
+## Servidor antigo sem `/props`
+
+Defina um fallback compatível com seu servidor:
+
+```json
+{
+  "llamaCpp.context.llamaCppFallbackTokens": 4096
+}
+```
+
+Ou informe diretamente:
+
+```json
+{
+  "llamaCpp.context.windowTokens": 8192
+}
+```
+
+## `STOPPED on first line for debugging`
+
+Isso ocorre quando o Extension Host foi iniciado pausado pelo debugger. Para executar sem depuração use:
+
+```text
+Ctrl+F5
+```
+
+---
+
+# Comandos úteis
 
 ```text
 Llama.cpp: Open Native Chat
@@ -544,9 +616,7 @@ Llama.cpp: Configure Inline Suggestions
 
 ---
 
-## Desenvolvimento
-
-Validação local:
+# Desenvolvimento
 
 ```bash
 npm run check
@@ -554,30 +624,28 @@ npm test
 npx @vscode/vsce package
 ```
 
-Para abrir o Extension Development Host sem debugger:
+Sem debugger:
 
 ```text
 Ctrl+F5
 ```
 
-Para depurar:
+Com debugger:
 
 ```text
 F5
 ```
 
-Se aparecer `STOPPED on first line for debugging`, o Extension Host está aguardando o debugger continuar; isso acontece antes da ativação da extensão.
-
 ---
 
-## Privacidade e credenciais
+# Privacidade e credenciais
 
 - chave OpenAI: VS Code SecretStorage;
-- chave do endpoint llama.cpp/API-compatible: SecretStorage separado;
+- chave llama.cpp/API-compatible: SecretStorage separado;
 - chave Brave Search: SecretStorage separado;
-- o Agent Mode não entrega acesso direto ao filesystem/terminal para o LLM;
+- Agent Mode não entrega acesso direto ao filesystem/terminal para o LLM;
 - `llamaCpp.openai.store` é `false` por padrão.
 
-## Licença
+# Licença
 
 MIT
