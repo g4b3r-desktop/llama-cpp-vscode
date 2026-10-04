@@ -88,7 +88,7 @@ class OpenAIClient {
     return body;
   }
 
-  async agentTurn({ messages, tools, signal, model }) {
+  async agentTurn({ messages, tools, signal, model, maxOutputTokens }) {
     const config = getConfig();
     const startedAt = Date.now();
     const body = {
@@ -97,7 +97,7 @@ class OpenAIClient {
       tools: toResponsesTools(tools),
       tool_choice: 'auto',
       parallel_tool_calls: false,
-      max_output_tokens: Math.max(64, Number(config.agent.maxTokensPerStep || 2048)),
+      max_output_tokens: Math.max(64, Number(maxOutputTokens || config.agent.maxTokensPerStep || 2048)),
       store: Boolean(config.openai.store)
     };
     const effort = String(config.openai.reasoningEffort || '').trim();
