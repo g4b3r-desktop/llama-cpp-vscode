@@ -8,8 +8,9 @@ class LlamaAgentModel extends AgentModel {
   async next({ messages, tools, signal, model }) {
     await this.client.ensureReady();
     const config = getConfig();
+    const prepared = await this.client.prepareContext(messages, { mode: 'agent', tools, maxOutputTokens: config.agent.maxTokensPerStep, model }, signal);
     const startedAt = Date.now();
-    const body = { messages, tools, tool_choice: 'auto', parallel_tool_calls: false, max_tokens: config.agent.maxTokensPerStep, temperature: config.agent.temperature, stream: false };
+    const body = { messages: prepared.messages, tools, tool_choice: 'auto', parallel_tool_calls: false, max_tokens: prepared.maxOutputTokens, temperature: config.agent.temperature, stream: false };
     if (config.mode === 'local') body.cache_prompt = true;
     const selectedModel = String(model || config.api.model || '').trim();
     if (selectedModel) body.model = selectedModel;
