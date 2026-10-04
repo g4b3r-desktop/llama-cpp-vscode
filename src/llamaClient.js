@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const { getConfig, configuredBaseUrl, endpointFromBase, llamaCppEndpoint, openAiEndpoint } = require('./config');
 const { requestJson, requestSse } = require('./http');
 const { OpenAIClient } = require('./openai/OpenAIClient');
+const { ContextBudgetManager, extractLlamaContextWindow, parseContextSizeArgs } = require('./context/ContextBudgetManager');
 
 class LlamaClient {
   constructor(secrets, localServer, output) {
@@ -13,6 +14,9 @@ class LlamaClient {
     this.metricsEmitter = new vscode.EventEmitter();
     this.onMetrics = this.metricsEmitter.event;
     this.lastMetrics = undefined;
+    this.lastContextBudget = undefined;
+    this.contextWindowCache = undefined;
+    this.inputTokenCounterUnavailable = new Set();
     this.openai = new OpenAIClient(secrets, output, this);
   }
 
@@ -42,6 +46,90 @@ class LlamaClient {
   }
 
   async testConnection() { return this.listModels(); }
+
+  async getContextWindowInfo(signal) {
+    const config = getConfig();
+    const override = Math.floor(Number(config.context.windowTokens || 0));
+    if (override > 0) return { tokens: override, source: 'settings' };
+
+    if (config.provider === 'openai') {
+      return { tokens: Math.max(256, Math.floor(Number(config.context.openAIContextWindowTokens || 128000))), source: 'OpenAI fallback' };
+    }
+
+    await this.ensureReady();
+    const key = configuredBaseUrl(config);
+    if (this.contextWindowCache?.key === key && this.contextWindowCache.expiresAt > Date.now()) return this.contextWindowCache.value;
+
+    try {
+      const props = await requestJson(llamaCppEndpoint('/props', config), { method: 'GET', headers: await this.headers() }, Math.min(config.request.timeoutMs, 5000), signal);
+      const detected = extractLlamaContextWindow(props);
+      if (detected) {
+        const value = { tokens: detected, source: 'llama.cpp /props' };
+        this.contextWindowCache = { key, value, expiresAt: Date.now() + 60000 };
+        return value;
+      }
+    } catch (error) {
+      this.output.appendLine(`[context] /props unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const fromArgs = config.mode === 'local' ? parseContextSizeArgs(config.local.args) : undefined;
+    const fallback = Math.max(256, Math.floor(Number(config.context.llamaCppFallbackTokens || 4096)));
+    const value = { tokens: fromArgs || fallback, source: fromArgs ? 'local --ctx-size' : 'llama.cpp fallback' };
+    this.contextWindowCache = { key, value, expiresAt: Date.now() + 30000 };
+    return value;
+  }
+
+  async countChatInputTokens(messages, tools = [], options = {}, signal) {
+    const config = getConfig();
+    if (config.provider === 'openai') return undefined;
+    await this.ensureReady();
+    const key = configuredBaseUrl(config);
+    if (this.inputTokenCounterUnavailable.has(key)) return undefined;
+    const body = { messages };
+    if (Array.isArray(tools) && tools.length) {
+      body.tools = tools;
+      body.tool_choice = 'auto';
+      body.parallel_tool_calls = false;
+    }
+    const selectedModel = String(options.model || config.api.model || '').trim();
+    if (selectedModel) body.model = selectedModel;
+    try {
+      const data = await requestJson(llamaCppEndpoint('/v1/chat/completions/input_tokens', config), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, Math.min(config.request.timeoutMs, 10000), signal);
+      const value = Number(data?.input_tokens);
+      return Number.isFinite(value) && value >= 0 ? Math.ceil(value) : undefined;
+    } catch (error) {
+      this.inputTokenCounterUnavailable.add(key);
+      this.output.appendLine(`[context] exact input-token count unavailable; using conservative estimate: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }
+
+  async prepareContext(messages, options = {}, signal) {
+    const config = getConfig();
+    const mode = options.mode === 'agent' ? 'agent' : 'chat';
+    const requestedOutputTokens = Math.max(1, Math.floor(Number(options.maxOutputTokens || (mode === 'agent' ? config.agent.maxTokensPerStep : config.chat.maxTokens))));
+    if (config.context.enabled === false) {
+      const stats = { disabled: true, trimmed: false, maxOutputTokens: requestedOutputTokens };
+      this.lastContextBudget = stats;
+      return { messages, maxOutputTokens: requestedOutputTokens, stats };
+    }
+
+    const info = await this.getContextWindowInfo(signal);
+    const tools = Array.isArray(options.tools) ? options.tools : [];
+    const manager = new ContextBudgetManager(config.context);
+    const result = await manager.fit({
+      messages,
+      tools,
+      contextWindowTokens: info.tokens,
+      requestedOutputTokens,
+      mode,
+      countTokens: config.provider === 'openai' ? undefined : candidate => this.countChatInputTokens(candidate, tools, options, signal)
+    });
+    result.stats.source = info.source;
+    this.lastContextBudget = result.stats;
+    this.output.appendLine(`[context:${mode}] n_ctx=${result.stats.contextWindowTokens} input=${result.stats.inputTokens}/${result.stats.inputBudgetTokens} output=${result.maxOutputTokens} source=${info.source} trimmed=${result.stats.trimmed}`);
+    return result;
+  }
 
   async complete(prefix, suffix, languageId, signal, extraFiles = [], options = {}) {
     const config = getConfig();
@@ -86,10 +174,12 @@ class LlamaClient {
 
   async chat(messages, signal, options = {}) {
     const config = getConfig();
-    if (config.provider === 'openai') return this.openai.chat(messages, signal, options);
+    const prepared = await this.prepareContext(messages, { ...options, mode: 'chat', maxOutputTokens: options.maxTokens || config.chat.maxTokens }, signal);
+    const finalOptions = { ...options, maxTokens: prepared.maxOutputTokens };
+    if (config.provider === 'openai') return this.openai.chat(prepared.messages, signal, finalOptions);
     await this.ensureReady();
     const startedAt = Date.now();
-    const body = this.chatBody(messages, false, config, options);
+    const body = this.chatBody(prepared.messages, false, config, finalOptions);
     const data = await requestJson(openAiEndpoint('/v1/chat/completions', config), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, config.request.timeoutMs, signal);
     this.emitMetrics('chat', startedAt, Date.now(), data);
     return extractFullChatContent(data);
@@ -97,9 +187,11 @@ class LlamaClient {
 
   async chatStream(messages, signal, onDelta, options = {}) {
     const config = getConfig();
-    if (config.provider === 'openai') return this.openai.chatStream(messages, signal, onDelta, options);
+    const prepared = await this.prepareContext(messages, { ...options, mode: 'chat', maxOutputTokens: options.maxTokens || config.chat.maxTokens }, signal);
+    const finalOptions = { ...options, maxTokens: prepared.maxOutputTokens };
+    if (config.provider === 'openai') return this.openai.chatStream(prepared.messages, signal, onDelta, finalOptions);
     await this.ensureReady();
-    const body = this.chatBody(messages, true, config, options);
+    const body = this.chatBody(prepared.messages, true, config, finalOptions);
     const startedAt = Date.now();
     let firstTokenAt;
     let full = '';
