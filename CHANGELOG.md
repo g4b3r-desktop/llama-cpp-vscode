@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.14.0
+- Classic Chat totalmente redesenhado com visual moderno integrado às cores/variáveis do VS Code.
+- Adicionados modos **Ask**, **Fresh**, **Research** e **Agent** diretamente no Classic Chat.
+- Agent/Research reutilizam o mesmo `AgentController`, ToolRegistry, permissões, Plan → Execute → Verify e pesquisa web controlada da aba principal.
+- Adicionado bloqueio global de sessões simultâneas do Agent para evitar conflitos entre Activity Bar, Classic Chat e Chat nativo.
+- Novo cabeçalho com provider/modelo, estado de conexão, teste de conexão, nova conversa e atalho para a aba principal.
+- Composer redesenhado com auto-resize, Enter para enviar, Shift+Enter para nova linha, modos em tabs e chips de contexto para arquivo/histórico/RAG.
+- Preferências de modo, contexto, histórico e rascunho do composer são persistidas com `vscode.setState`.
+- Mensagens agora mostram autor, horário e modo, com ações de **Copiar**, **Editar**, **Repetir** e **Regenerar**.
+- Blocos de código possuem botão próprio de copiar; cópia usa `vscode.env.clipboard` pelo Extension Host.
+- Markdown do Classic Chat ganhou tabelas, task lists, blockquotes, headings, listas, links, código e strikethrough.
+- Adicionados empty state com sugestões rápidas para explicar arquivo, revisar código, pesquisar documentação ou iniciar Agent Mode.
+- O painel mostra progresso do plano do agente, status de verificação, status do RAG e permite reindexar ou executar rollback.
+- Histórico visual do Classic Chat é mantido ao fechar/reabrir o painel durante a mesma sessão da extensão.
+- Adicionados helpers testáveis para trimming de histórico, regeneração do último turno e apresentação do provider.
+
 ## 0.13.0
 - Adicionada uma aba própria **llama.cpp** na Activity Bar do VS Code, separada do painel de Chat/Copilot.
 - A nova view usa `WebviewViewProvider` e se torna a interface principal para Chat e Agent Mode.
