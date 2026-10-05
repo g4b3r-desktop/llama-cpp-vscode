@@ -1,21 +1,31 @@
 {
   "name": "llama-cpp-assistant",
   "displayName": "llama.cpp Assistant",
-  "description": "Copilot-like VS Code assistant for local/remote llama.cpp or OpenAI: native Chat, plan-execute-verify agent tools, controlled web research, context budgeting, inline suggestions, RAG and performance metrics.",
-  "version": "0.12.0",
+  "description": "Copilot-like VS Code assistant for local/remote llama.cpp or OpenAI with a dedicated Activity Bar chat/agent tab, native Chat compatibility, plan-execute-verify tools, web research, RAG and context budgeting.",
+  "version": "0.13.0",
   "publisher": "local",
   "license": "MIT",
   "engines": {"vscode": "^1.117.0"},
   "categories": ["Machine Learning", "Other"],
-  "keywords": ["AI", "agent", "agent mode", "planning", "plan execute verify", "tools", "FIM", "RAG", "autocomplete", "chat participant", "llama", "llama.cpp", "OpenAI", "ChatGPT", "Responses API", "GPT", "local LLM", "native chat", "inline edit", "inline suggestions", "Copilot alternative", "rollback", "web search", "web research", "Brave Search", "SearXNG", "context budget"],
-  "activationEvents": ["onStartupFinished"],
+  "keywords": ["AI", "agent", "agent mode", "activity bar", "sidebar", "planning", "plan execute verify", "tools", "FIM", "RAG", "autocomplete", "chat participant", "llama", "llama.cpp", "OpenAI", "ChatGPT", "Responses API", "GPT", "local LLM", "native chat", "inline edit", "inline suggestions", "Copilot alternative", "rollback", "web search", "web research", "Brave Search", "SearXNG", "context budget"],
+  "activationEvents": ["onStartupFinished", "onView:llamaCpp.assistantView"],
   "main": "./src/extension.js",
   "scripts": {
-    "check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/context/ContextBudgetManager.js && node --check src/openai/OpenAIClient.js && node --check src/openai/responseUtils.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check src/inlineSuggestionsController.js && node --check src/agent/AgentController.js && node --check src/agent/AgentRunner.js && node --check src/agent/AgentPlan.js && node --check src/tools/ToolRegistry.js && node --check src/tools/registerCoreTools.js && node --check src/workspace/pathSafety.js && node --check src/workspace/diff.js && node --check src/workspace/WorkspaceService.js && node --check src/terminal/TerminalService.js && node --check src/terminal/commandPolicy.js && node --check src/permissions/PermissionService.js && node --check src/history/AgentHistory.js && node --check src/llm/AgentModel.js && node --check src/llm/LlamaAgentModel.js && node --check src/llm/OpenAIAgentModel.js && node --check src/web/urlSafety.js && node --check src/web/WebResearchService.js && node --check media/chat.js",
+    "check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/context/ContextBudgetManager.js && node --check src/openai/OpenAIClient.js && node --check src/openai/responseUtils.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check src/inlineSuggestionsController.js && node --check src/agent/AgentController.js && node --check src/agent/AgentRunner.js && node --check src/agent/AgentPlan.js && node --check src/sidebar/AssistantViewProvider.js && node --check src/sidebar/requestMode.js && node --check src/tools/ToolRegistry.js && node --check src/tools/registerCoreTools.js && node --check src/workspace/pathSafety.js && node --check src/workspace/diff.js && node --check src/workspace/WorkspaceService.js && node --check src/terminal/TerminalService.js && node --check src/terminal/commandPolicy.js && node --check src/permissions/PermissionService.js && node --check src/history/AgentHistory.js && node --check src/llm/AgentModel.js && node --check src/llm/LlamaAgentModel.js && node --check src/llm/OpenAIAgentModel.js && node --check src/web/urlSafety.js && node --check src/web/WebResearchService.js && node --check media/chat.js && node --check media/sidebar.js",
     "test": "node --test test/*.test.js",
     "package": "npx @vscode/vsce package"
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {"id": "llamaCppAssistant", "title": "llama.cpp", "icon": "media/llama.svg"}
+      ]
+    },
+    "views": {
+      "llamaCppAssistant": [
+        {"type": "webview", "id": "llamaCpp.assistantView", "name": "Assistant", "contextualTitle": "llama.cpp Assistant"}
+      ]
+    },
     "languageModelChatProviders": [{"vendor": "g4b3r-llamacpp", "displayName": "llama.cpp / OpenAI", "managementCommand": "llamaCpp.manageProvider"}],
     "chatParticipants": [{
       "id": "llama-cpp-assistant.llama",
@@ -36,7 +46,9 @@
       ]
     }],
     "commands": [
-      {"command": "llamaCpp.openChat", "title": "Llama.cpp: Open Native Chat", "icon": "$(comment-discussion)"},
+      {"command": "llamaCpp.openChat", "title": "Llama.cpp: Open Assistant Tab", "icon": "$(sparkle)"},
+      {"command": "llamaCpp.openAssistantView", "title": "Llama.cpp: Focus Assistant Tab", "icon": "$(sparkle)"},
+      {"command": "llamaCpp.openNativeChat", "title": "Llama.cpp: Open Native VS Code Chat (@llama)", "icon": "$(comment-discussion)"},
       {"command": "llamaCpp.runAgent", "title": "Llama.cpp: Run Agent", "icon": "$(tools)"},
       {"command": "llamaCpp.rollbackAgent", "title": "Llama.cpp: Roll Back Last Agent Changes"},
       {"command": "llamaCpp.setWebSearchApiKey", "title": "Llama.cpp: Set Web Search API Key"},
@@ -74,7 +86,11 @@
         {"command": "llamaCpp.generateTests", "group": "2_chat@3"},
         {"command": "llamaCpp.runAgent", "group": "3_agent@1"}
       ],
-      "editor/title": [{"command": "llamaCpp.openChat", "group": "navigation@100", "when": "editorTextFocus"}]
+      "editor/title": [{"command": "llamaCpp.openChat", "group": "navigation@100", "when": "editorTextFocus"}],
+      "view/title": [
+        {"command": "llamaCpp.manageProvider", "when": "view == llamaCpp.assistantView", "group": "navigation@1"},
+        {"command": "llamaCpp.openNativeChat", "when": "view == llamaCpp.assistantView", "group": "navigation@2"}
+      ]
     },
     "configuration": {
       "title": "llama.cpp Assistant",
@@ -103,7 +119,7 @@
         "llamaCpp.local.args": {"type": "array", "items": {"type": "string"}, "default": []},
         "llamaCpp.api.baseUrl": {"type": "string", "default": "http://127.0.0.1:8080"},
         "llamaCpp.api.model": {"type": "string", "default": "", "description": "Default llama.cpp/OpenAI-compatible model. Native VS Code Chat can choose among models returned by /v1/models."},
-        "llamaCpp.agent.enabled": {"type": "boolean", "default": true, "description": "Enable the autonomous controlled-tool agent exposed as @llama /agent."},
+        "llamaCpp.agent.enabled": {"type": "boolean", "default": true, "description": "Enable the autonomous controlled-tool agent exposed in the dedicated Activity Bar tab and as @llama /agent."},
         "llamaCpp.agent.maxSteps": {"type": "number", "default": 30, "minimum": 1, "maximum": 100, "description": "Maximum model/tool iterations per agent task; the separate planning call is not counted."},
         "llamaCpp.agent.maxTokensPerStep": {"type": "number", "default": 2048, "minimum": 64},
         "llamaCpp.agent.temperature": {"type": "number", "default": 0.1, "minimum": 0, "maximum": 2},
