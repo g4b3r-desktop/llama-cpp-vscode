@@ -14,6 +14,7 @@ const {getConfig}=require('../config');
 class AgentController{
   constructor(context,client,output){this.context=context;this.client=client;this.output=output;this.activeRunner=undefined;this.web=new WebResearchService(context.secrets,output);}
   async run(prompt,options={}){
+    if(this.activeRunner)throw new Error('Another llama.cpp agent task is already running. Finish or cancel it before starting a new Agent/Research task.');
     const config=getConfig();
     if(!config.agent.enabled)throw new Error('Agent mode is disabled in llama.cpp Assistant settings.');
     const rootUri=selectWorkspaceRoot();if(!rootUri)throw new Error('Open a workspace folder before running the agent.');if(rootUri.scheme!=='file')throw new Error('Agent mode currently requires a file-based workspace.');
