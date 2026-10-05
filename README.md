@@ -1,14 +1,15 @@
 # llama.cpp Assistant para VS Code
 
-Extensão para transformar o VS Code em um assistente de programação com suporte a **llama.cpp local/remoto** e à **API da OpenAI**. O projeto reúne Chat nativo, Agent Mode, pesquisa web controlada, sugestões inline, ações de edição, RAG, rollback, métricas de desempenho e gerenciamento automático da janela de contexto.
+Extensão para transformar o VS Code em um assistente de programação com suporte a **llama.cpp local/remoto** e à **API da OpenAI**. O projeto reúne Chat nativo, Agent Mode com **Plan → Execute → Verify**, pesquisa web controlada, sugestões inline, ações de edição, RAG, rollback, métricas de desempenho e gerenciamento automático da janela de contexto.
 
 ## Principais recursos
 
 - Chat nativo do VS Code com `@llama`.
 - Provider alternável entre `llama.cpp` e OpenAI.
+- Agent Mode com plano operacional público, execução por etapas e verificação final.
+- Tool Host controlado para arquivos, busca, diagnostics, terminal e internet.
 - **Context Budget Manager** para impedir prompts maiores que a janela disponível.
-- Detecção automática de `n_ctx` em servidores llama.cpp atuais.
-- Agent Mode com ferramentas controladas para arquivos, buscas, diagnósticos e terminal.
+- Detecção automática de `n_ctx` em servidores llama.cpp compatíveis.
 - Pesquisa detalhada na internet com Brave Search ou SearXNG.
 - Modo `/fresh` para inferência sem histórico anterior.
 - Sugestões inline por linguagem/tipo de arquivo.
@@ -17,6 +18,37 @@ Extensão para transformar o VS Code em um assistente de programação com supor
 - Diff, backups e rollback de sessões do agente.
 - Métricas de TTFT, tokens/s e cache quando o backend fornece esses dados.
 
+## Arquitetura de segurança
+
+A regra principal do projeto é:
+
+```text
+LLM
+ │
+ │ solicita ferramenta estruturada
+ ▼
+Tool Host da extensão
+ │
+ ├─ valida parâmetros
+ ├─ restringe ao workspace
+ ├─ verifica permissões
+ ├─ gera diff/backups
+ ├─ controla terminal/rede
+ └─ executa
+```
+
+O projeto **não** implementa:
+
+```text
+LLM → filesystem diretamente
+```
+
+O modelo também não recebe acesso direto ao terminal, VS Code Diagnostics ou socket de rede.
+
+---
+
+# Instalação
+
 ## Requisitos
 
 - VS Code `1.117.0` ou superior.
@@ -24,20 +56,19 @@ Extensão para transformar o VS Code em um assistente de programação com supor
 - Para OpenAI: uma chave válida da API da OpenAI.
 - Para pesquisa web: Brave Search API ou uma instância SearXNG configurada.
 
-## Instalação
+## Instalar pelo VSIX
 
-Baixe o `.vsix` da versão mais recente em **Releases** e instale pelo VS Code:
+1. Baixe o `.vsix` da versão mais recente em **Releases**.
+2. Abra `Ctrl+Shift+P`.
+3. Execute **Extensions: Install from VSIX...**.
+4. Selecione `llama-cpp-assistant-<versão>.vsix`.
+5. Execute **Developer: Reload Window** se necessário.
 
-1. Abra a Command Palette com `Ctrl+Shift+P`.
-2. Execute **Extensions: Install from VSIX...**.
-3. Selecione `llama-cpp-assistant-<versão>.vsix`.
-4. Execute **Developer: Reload Window** se necessário.
-
-Para desenvolvimento, use `Ctrl+F5` para iniciar um Extension Development Host sem pausar na primeira linha. `F5` inicia depuração e pode deixar o Extension Host parado aguardando o debugger.
+Para desenvolvimento use `Ctrl+F5` para abrir um Extension Development Host sem pausar na primeira linha. `F5` inicia uma sessão de depuração.
 
 ---
 
-## Escolhendo o provider
+# Escolhendo o provider
 
 Execute:
 
@@ -68,112 +99,7 @@ ou:
 
 ---
 
-# Context Budget Manager
-
-A partir da **v0.11.0**, Chat e Agent Mode passam por um gerenciador de orçamento antes de cada inferência.
-
-O objetivo é impedir erros como:
-
-```text
-request (5673 tokens) exceeds the available context size (4096 tokens)
-```
-
-Em servidores llama.cpp atuais, a extensão tenta descobrir automaticamente `n_ctx` através de `/props`. Quando o servidor também oferece contagem de tokens para Chat Completions, o plugin usa essa contagem antes de enviar a inferência. Em versões antigas, usa um fallback configurável e uma estimativa conservadora.
-
-Para OpenAI, a extensão usa uma janela configurável localmente para montar o orçamento. Isso é um limite de segurança da extensão e deve ser ajustado de acordo com o modelo escolhido.
-
-## Ordem de prioridade do contexto
-
-O plugin preserva primeiro o que é essencial:
-
-```text
-system prompt / regras do agente
-        ↓
-pedido atual do usuário
-        ↓
-schemas das ferramentas
-        ↓
-contexto opcional restante
-```
-
-Quando a solicitação está grande demais, o gerenciador tenta nesta ordem:
-
-1. remover turnos antigos do Chat;
-2. compactar resultados antigos e grandes de ferramentas do agente;
-3. remover ciclos antigos completos do Agent Mode sem separar `tool_call` do respectivo resultado;
-4. reduzir o final do contexto automático, RAG e anexos, mantendo o prompt atual;
-5. reduzir o resumo inicial do workspace do agente;
-6. diminuir a reserva de saída até `llamaCpp.context.minOutputTokens`;
-7. se ainda não couber, retornar um erro claro **antes** de chamar o provider.
-
-A extensão não deve cortar silenciosamente o texto essencial digitado pelo usuário apenas para forçar o prompt a caber.
-
-## Configuração do orçamento
-
-```json
-{
-  "llamaCpp.context.enabled": true,
-  "llamaCpp.context.windowTokens": 0,
-  "llamaCpp.context.llamaCppFallbackTokens": 4096,
-  "llamaCpp.context.openAIContextWindowTokens": 128000,
-  "llamaCpp.context.safetyMarginTokens": 128,
-  "llamaCpp.context.minOutputTokens": 256,
-  "llamaCpp.context.charactersPerToken": 3
-}
-```
-
-### `llamaCpp.context.windowTokens`
-
-Override manual da janela. `0` significa automático/fallback.
-
-Exemplo para forçar 8192:
-
-```json
-{
-  "llamaCpp.context.windowTokens": 8192
-}
-```
-
-### `llamaCpp.context.llamaCppFallbackTokens`
-
-Usado quando um servidor llama.cpp não expõe a janela de contexto e ela não pode ser inferida da configuração local.
-
-### `llamaCpp.context.openAIContextWindowTokens`
-
-Limite usado pelo gerenciador para o provider OpenAI. Ajuste para o modelo utilizado se necessário.
-
-### `llamaCpp.context.safetyMarginTokens`
-
-Reserva para diferenças de tokenização/chat template e overhead do backend.
-
-### `llamaCpp.context.minOutputTokens`
-
-Quantidade mínima que o gerenciador tenta preservar para a resposta ou para a próxima decisão do agente.
-
-### Exemplo: servidor com 4096 tokens
-
-Com:
-
-```json
-{
-  "llamaCpp.local.args": ["--ctx-size", "4096"],
-  "llamaCpp.chat.maxTokens": 1024,
-  "llamaCpp.context.safetyMarginTokens": 128,
-  "llamaCpp.context.minOutputTokens": 256
-}
-```
-
-o gerenciador tenta montar cada chamada respeitando os 4096 tokens. Se o histórico crescer, mensagens antigas são removidas antes de reduzir o contexto do pedido atual.
-
-O comando `/fresh` continua útil para começar imediatamente sem histórico:
-
-```text
-@llama /fresh analise este erro
-```
-
----
-
-## Configurando llama.cpp local
+# Configurando llama.cpp local
 
 Exemplo:
 
@@ -200,9 +126,9 @@ Argumentos adicionais são enviados por `llamaCpp.local.args`:
 }
 ```
 
-Use um tamanho compatível com o modelo e com a memória disponível.
+Use um `--ctx-size` compatível com o modelo e com a memória disponível.
 
-### llama.cpp remoto
+## llama.cpp remoto
 
 ```json
 {
@@ -223,7 +149,7 @@ A chave fica no SecretStorage do VS Code.
 
 ---
 
-## Configurando OpenAI
+# Configurando OpenAI
 
 1. Execute **Llama.cpp: Manage Model Provider**.
 2. Escolha **Use OpenAI API**.
@@ -247,7 +173,7 @@ Exemplo:
 
 O provider OpenAI pode ser usado por Chat, Agent Mode, function calling, pesquisa controlada e ações de edição.
 
-### Controle de custos
+## Controle de custos
 
 Autocomplete e embeddings por OpenAI ficam desligados por padrão:
 
@@ -256,6 +182,70 @@ Autocomplete e embeddings por OpenAI ficam desligados por padrão:
   "llamaCpp.openai.useForAutocomplete": false,
   "llamaCpp.openai.useForEmbeddings": false,
   "llamaCpp.openai.embeddingModel": "text-embedding-3-small"
+}
+```
+
+O Agent Mode com planejamento usa uma chamada adicional de modelo para criar o plano público antes de executar ferramentas. Se quiser evitar essa chamada, desative `llamaCpp.agent.planning.enabled`.
+
+---
+
+# Context Budget Manager
+
+A partir da **v0.11.0**, Chat e Agent Mode passam por um gerenciador de orçamento antes de cada inferência.
+
+Ele evita erros como:
+
+```text
+request (5673 tokens) exceeds the available context size (4096 tokens)
+```
+
+Em servidores llama.cpp compatíveis, a extensão tenta descobrir automaticamente `n_ctx` através de `/props`. Quando o servidor também oferece contagem de tokens para Chat Completions, o plugin usa essa contagem antes de enviar a inferência. Em versões antigas, usa um fallback configurável e uma estimativa conservadora.
+
+Para OpenAI, a extensão usa uma janela configurável localmente para montar o orçamento. Ajuste esse limite conforme o modelo utilizado.
+
+## Prioridade do contexto
+
+```text
+system prompt / regras do agente
+        ↓
+pedido atual do usuário
+        ↓
+schemas das ferramentas
+        ↓
+contexto opcional restante
+```
+
+Quando a solicitação está grande demais, o gerenciador tenta nesta ordem:
+
+1. remover turnos antigos do Chat;
+2. compactar resultados antigos e grandes de ferramentas do agente;
+3. remover ciclos antigos completos do Agent Mode sem separar `tool_call` do resultado;
+4. reduzir o final do contexto automático, RAG e anexos, mantendo o prompt atual;
+5. reduzir o resumo inicial do workspace do agente;
+6. diminuir a reserva de saída até `llamaCpp.context.minOutputTokens`;
+7. se ainda não couber, retornar erro antes de chamar o provider.
+
+Configuração:
+
+```json
+{
+  "llamaCpp.context.enabled": true,
+  "llamaCpp.context.windowTokens": 0,
+  "llamaCpp.context.llamaCppFallbackTokens": 4096,
+  "llamaCpp.context.openAIContextWindowTokens": 128000,
+  "llamaCpp.context.safetyMarginTokens": 128,
+  "llamaCpp.context.minOutputTokens": 256,
+  "llamaCpp.context.charactersPerToken": 3
+}
+```
+
+`llamaCpp.context.windowTokens: 0` significa detectar automaticamente ou usar o fallback.
+
+Para forçar 8192:
+
+```json
+{
+  "llamaCpp.context.windowTokens": 8192
 }
 ```
 
@@ -295,7 +285,7 @@ Comandos disponíveis:
 @llama /fresh explique esta função sem considerar nossa conversa anterior
 ```
 
-`/fresh` ignora as mensagens anteriores somente nessa inferência. Anexos explícitos, arquivo atual e RAG continuam independentes.
+`/fresh` ignora mensagens anteriores somente nessa inferência. Anexos explícitos, arquivo atual e RAG continuam independentes.
 
 Globalmente:
 
@@ -317,31 +307,139 @@ Referências `@arquivo` continuam disponíveis no Chat clássico.
 
 ---
 
-# Agent Mode
+# Agent Mode — Plan → Execute → Verify
 
-Use:
+A partir da **v0.12.0**, o Agent Mode não começa alterando arquivos imediatamente. O fluxo padrão é:
+
+```text
+ANALYZE
+   ↓
+PLAN
+   ↓
+EXECUTE
+   ↓
+VERIFY
+   ↓
+DONE
+```
+
+Uso:
 
 ```text
 @llama /agent corrija os testes que estão falhando e valide a solução
 ```
 
-Fluxo:
+## 1. Plan
+
+O modelo recebe uma chamada sem ferramentas e retorna apenas um **plano operacional público** curto, por exemplo:
 
 ```text
-Pedido
-  ↓
-LLM solicita uma ferramenta
-  ↓
-Tool Host valida permissões/parâmetros
-  ↓
-Extensão executa
-  ↓
-Resultado volta ao modelo
-  ↓
-Próxima decisão
+Plano:
+● Localizar a implementação afetada
+○ Corrigir o comportamento
+○ Atualizar os testes
+○ Validar diagnostics e testes relevantes
 ```
 
-O LLM **não recebe acesso direto** ao filesystem, terminal ou socket de rede.
+Esse plano:
+
+- é mostrado ao usuário;
+- contém apenas ações observáveis;
+- não é chain-of-thought;
+- não contém raciocínio privado do modelo;
+- tem limite configurável de etapas;
+- sempre termina em uma etapa de verificação.
+
+Se o modelo não retornar JSON de plano válido, o host usa um plano seguro de fallback.
+
+## 2. Execute
+
+A extensão executa uma etapa por vez. Para cada etapa:
+
+```text
+etapa atual
+   ↓
+modelo solicita ferramenta
+   ↓
+Tool Host valida
+   ↓
+resultado volta ao modelo
+   ↓
+repete até a etapa terminar
+```
+
+Quando o modelo responde sem nova chamada de ferramenta, o host marca a etapa como concluída e avança.
+
+Estados possíveis:
+
+```text
+○ pendente
+● executando
+✓ concluído
+✗ falhou
+```
+
+## 3. Verify
+
+Se algum arquivo foi alterado, verificações anteriores são invalidadas.
+
+Antes de concluir, a extensão exige uma nova fase de verificação:
+
+- coleta `get_errors` depois das últimas alterações;
+- solicita teste/build/lint/typecheck relevante via `run_terminal` quando aplicável;
+- se houver novas alterações durante a correção, a validação precisa ser feita novamente;
+- se não existir comando aplicável, o modelo precisa declarar isso em vez de fingir que testes rodaram.
+
+O host registra separadamente:
+
+```text
+workspaceChanged: true/false
+diagnostics: true/false
+command: true/false
+```
+
+Assim, “diagnostics verificados” e “testes executados” não são tratados como a mesma coisa.
+
+## Resposta final
+
+Por padrão, a resposta inclui o plano concluído:
+
+```markdown
+### Plano executado
+- ✅ Localizar implementação
+- ✅ Corrigir comportamento
+- ✅ Atualizar testes
+- ✅ Validar diagnostics e testes relevantes
+```
+
+Depois vem o resumo final do modelo com alterações e validação.
+
+## Configuração do planejamento
+
+```json
+{
+  "llamaCpp.agent.planning.enabled": true,
+  "llamaCpp.agent.planning.maxPlanSteps": 6,
+  "llamaCpp.agent.planning.requireVerification": true,
+  "llamaCpp.agent.planning.showFinalPlan": true
+}
+```
+
+### `llamaCpp.agent.planning.enabled`
+
+Quando `true`, faz uma chamada separada para criar o plano antes da execução. Quando `false`, usa um plano mínimo de fallback sem uma chamada extra de planejamento.
+
+### `llamaCpp.agent.planning.maxPlanSteps`
+
+Limita o plano público entre 2 e 10 etapas.
+
+### `llamaCpp.agent.planning.requireVerification`
+
+Quando `true`, alterações no workspace exigem diagnostics atualizados e uma tentativa explícita de validação por teste/build/lint/typecheck quando aplicável.
+
+### `llamaCpp.agent.planning.showFinalPlan`
+
+Inclui o estado final do plano na resposta do agente.
 
 ## Ferramentas principais
 
@@ -374,8 +472,9 @@ O LLM **não recebe acesso direto** ao filesystem, terminal ou socket de rede.
 - diff das alterações;
 - rollback da última sessão;
 - timeout e limite de saída do terminal;
-- limite máximo de passos;
-- orçamento de contexto em cada iteração.
+- limite máximo de iterações;
+- orçamento de contexto em cada chamada;
+- plano público sem exposição de raciocínio privado.
 
 Rollback:
 
@@ -383,7 +482,7 @@ Rollback:
 Llama.cpp: Roll Back Last Agent Changes
 ```
 
-Configuração:
+Configuração principal:
 
 ```json
 {
@@ -394,7 +493,9 @@ Configuração:
   "llamaCpp.agent.confirmFileWrites": false,
   "llamaCpp.agent.confirmTerminalCommands": true,
   "llamaCpp.agent.terminalTimeoutMs": 120000,
-  "llamaCpp.agent.maxToolResultCharacters": 30000
+  "llamaCpp.agent.maxToolResultCharacters": 30000,
+  "llamaCpp.agent.planning.enabled": true,
+  "llamaCpp.agent.planning.requireVerification": true
 }
 ```
 
@@ -524,7 +625,7 @@ Exemplo:
 }
 ```
 
-O Context Budget Manager atua **depois** da recuperação: se o RAG trouxer mais texto do que cabe no prompt, o material de menor prioridade no final da solicitação é reduzido antes da inferência.
+O Context Budget Manager atua depois da recuperação: se o RAG trouxer mais texto do que cabe, contexto opcional é reduzido antes da inferência.
 
 ---
 
@@ -549,7 +650,13 @@ O Output Channel `llama.cpp Assistant` também registra linhas como:
 [context:chat] n_ctx=4096 input=2310/2944 output=1024 source=llama.cpp /props trimmed=true
 ```
 
-Isso ajuda a diagnosticar quanto contexto foi mantido e qual limite foi detectado.
+O Agent Mode registra também transições do plano:
+
+```text
+[agent:plan:plan] Plano: | ○ localizar implementação | ○ corrigir | ○ validar
+[agent:plan:execute] Plano: | ● localizar implementação | ○ corrigir | ○ validar
+[agent:plan:verify] Plano: | ✓ localizar implementação | ✓ corrigir | ● validar
+```
 
 ---
 
@@ -557,20 +664,16 @@ Isso ajuda a diagnosticar quanto contexto foi mantido e qual limite foi detectad
 
 ## `request (...) exceeds the available context size`
 
-Na v0.11.0, esse erro deve ser evitado no Chat/Agent Mode pelo orçamento automático.
-
-Se ainda ocorrer:
+Se ocorrer:
 
 1. confirme que `llamaCpp.context.enabled` está `true`;
 2. confira o valor de `n_ctx` no Output Channel;
-3. use `llamaCpp.context.windowTokens` se o servidor reportar um limite incorreto;
-4. aumente `--ctx-size` se o modelo/hardware permitirem;
+3. use `llamaCpp.context.windowTokens` se o servidor reportar limite incorreto;
+4. aumente `--ctx-size` se modelo/hardware permitirem;
 5. use `/fresh` para eliminar histórico imediatamente;
 6. reduza RAG/anexos em modelos com contexto muito pequeno.
 
 ## Servidor antigo sem `/props`
-
-Defina um fallback compatível com seu servidor:
 
 ```json
 {
@@ -585,6 +688,17 @@ Ou informe diretamente:
   "llamaCpp.context.windowTokens": 8192
 }
 ```
+
+## Agente termina sem executar testes
+
+Veja o resumo/metadata de verificação. Se aparecer:
+
+```text
+diagnostics: true
+command: false
+```
+
+significa que o host coletou diagnostics depois das mudanças, mas nenhum teste/build/lint/typecheck reconhecido foi executado. Isso pode ser legítimo em projetos sem comando aplicável; o agente deve explicar o motivo.
 
 ## `STOPPED on first line for debugging`
 
@@ -644,6 +758,7 @@ F5
 - chave llama.cpp/API-compatible: SecretStorage separado;
 - chave Brave Search: SecretStorage separado;
 - Agent Mode não entrega acesso direto ao filesystem/terminal para o LLM;
+- planos públicos não incluem chain-of-thought;
 - `llamaCpp.openai.store` é `false` por padrão.
 
 # Licença
