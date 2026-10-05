@@ -13,6 +13,7 @@ class AssistantViewProvider {
     this.extensionUri = extensionUri;
     this.output = output;
     this.view = undefined;
+    this.webviewReady = false;
     this.history = [];
     this.transcript = [];
     this.activeRequest = undefined;
@@ -27,19 +28,26 @@ class AssistantViewProvider {
 
   resolveWebviewView(webviewView) {
     this.view = webviewView;
+    this.webviewReady = false;
     const mediaRoot = vscode.Uri.joinPath(this.extensionUri, 'media');
     webviewView.webview.options = { enableScripts: true, localResourceRoots: [mediaRoot] };
     webviewView.webview.html = this.html(webviewView.webview);
     webviewView.webview.onDidReceiveMessage(message => this.onMessage(message));
     webviewView.onDidDispose(() => {
       this.activeRequest?.abort();
-      if (this.view === webviewView) this.view = undefined;
+      if (this.view === webviewView) {
+        this.view = undefined;
+        this.webviewReady = false;
+      }
     });
   }
 
   async focus(initialPrompt, mode = 'ask', options = {}) {
     this.rememberActiveFileEditor();
-    this.pendingCompose = initialPrompt ? { text: String(initialPrompt), mode: normalizeMode(mode), includeActiveFile: options.includeActiveFile } : undefined;
+    const selectedMode = normalizeMode(mode);
+    if (initialPrompt !== undefined || selectedMode !== 'ask' || typeof options.includeActiveFile === 'boolean') {
+      this.pendingCompose = { text: String(initialPrompt || ''), mode: selectedMode, includeActiveFile: options.includeActiveFile };
+    }
     try { await vscode.commands.executeCommand(`${VIEW_ID}.focus`); }
     catch { await vscode.commands.executeCommand('workbench.view.extension.llamaCppAssistant'); }
     this.postEditorState();
@@ -67,6 +75,7 @@ class AssistantViewProvider {
     } else if (message?.type === 'reindex') {
       await this.reindex();
     } else if (message?.type === 'ready') {
+      this.webviewReady = true;
       this.post({ type: 'hydrate', transcript: this.transcript });
       this.postEditorState();
       this.postProviderState();
@@ -105,7 +114,7 @@ class AssistantViewProvider {
   }
 
   postEditorState() {
-    if (!this.view) return;
+    if (!this.view || !this.webviewReady) return;
     const editor = this.getContextEditor();
     const hasFile = Boolean(editor && editor.document.uri.scheme === 'file');
     const filename = hasFile ? vscode.workspace.asRelativePath(editor.document.uri, true) : '';
@@ -120,6 +129,7 @@ class AssistantViewProvider {
   }
 
   postProviderState() {
+    if (!this.view || !this.webviewReady) return;
     const config = getConfig();
     this.post({
       type: 'providerState',
@@ -129,18 +139,19 @@ class AssistantViewProvider {
   }
 
   flushPendingCompose() {
-    if (!this.view || !this.pendingCompose) return;
+    if (!this.view || !this.webviewReady || !this.pendingCompose) return;
     this.post({ type: 'compose', ...this.pendingCompose });
     this.pendingCompose = undefined;
   }
 
   post(message) {
-    this.view?.webview.postMessage(message);
+    if (!this.view || !this.webviewReady) return;
+    this.view.webview.postMessage(message);
   }
 
   async handleAsk(rawText, options = {}) {
     const text = String(rawText || '').trim();
-    if (!text || !this.view) return;
+    if (!text || !this.view || !this.webviewReady) return;
     const config = getConfig();
     const mode = normalizeMode(options.mode);
     const includeActiveFile = typeof options.includeActiveFile === 'boolean' ? options.includeActiveFile : config.chat.includeEditorContext;
@@ -155,7 +166,7 @@ class AssistantViewProvider {
     const requestId = `sidebar-${++this.requestSerial}`;
     const userEntry = { role: 'user', text, mode, meta: `${modeLabel(mode)} · ${includeActiveFile && activeFilename ? activeFilename : 'sem arquivo automático'}` };
     this.transcript.push(userEntry);
-    this.post({ type: 'user', ...userEntry, includeHistory, activeFilename });
+    this.post({ type: 'user', ...userEntry, includeHistory, includeActiveFile: Boolean(includeActiveFile && activeFilename), activeFilename });
     this.post({ type: 'busy', value: true, mode });
 
     try {
