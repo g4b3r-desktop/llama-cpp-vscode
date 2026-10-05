@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0
+- Adicionado fluxo **Plan → Execute → Verify** ao Agent Mode.
+- O agente agora gera primeiro um plano operacional público curto, sem expor chain-of-thought, e executa as etapas uma por vez.
+- Estados do plano (`pending`, `running`, `completed`, `failed`) são enviados como progresso para o Chat nativo e incluídos opcionalmente na resposta final.
+- A etapa final de verificação é garantida mesmo quando o modelo não a inclui no plano inicial.
+- Após qualquer alteração no workspace, a verificação exige diagnostics atualizados e solicita um comando relevante de teste/build/lint/typecheck quando aplicável.
+- `get_errors` pode ser executado automaticamente pelo host na fase de verificação, mantendo o LLM sem acesso direto ao VS Code Diagnostics.
+- Alterações posteriores invalidam verificações anteriores, obrigando nova validação antes da conclusão.
+- Chamadas de planejamento não recebem ferramentas e agora são suportadas corretamente tanto pelo llama.cpp quanto pela OpenAI Responses API.
+- Adicionadas configurações `llamaCpp.agent.planning.enabled`, `maxPlanSteps`, `requireVerification` e `showFinalPlan`.
+- O metadata do Chat nativo agora inclui o plano final e o estado de verificação da sessão.
+- Adicionados testes unitários para parsing/fallback do plano, limite de etapas, estados públicos e classificação de ferramentas de mutação/verificação.
+
 ## 0.11.0
 - Adicionado `ContextBudgetManager` compartilhado por Chat e Agent Mode para impedir requisições maiores que a janela de contexto disponível.
 - O provider llama.cpp agora tenta detectar automaticamente `n_ctx` por `GET /props` e usa `--ctx-size`/fallback configurável quando a detecção não está disponível.
