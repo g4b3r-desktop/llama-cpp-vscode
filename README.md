@@ -1,17 +1,19 @@
 # llama.cpp Assistant para VS Code
 
-Extensão para transformar o VS Code em um assistente de programação com suporte a **llama.cpp local/remoto** e à **API da OpenAI**. O projeto reúne Chat nativo, Agent Mode com **Plan → Execute → Verify**, pesquisa web controlada, sugestões inline, ações de edição, RAG, rollback, métricas de desempenho e gerenciamento automático da janela de contexto.
+Extensão para transformar o VS Code em um assistente de programação com suporte a **llama.cpp local/remoto** e à **API da OpenAI**. A interface principal fica em uma **aba própria na Activity Bar**, separada do Chat/Copilot, com Ask, Agent, Research e Fresh. O projeto também mantém integração opcional com o Chat nativo via `@llama`, Agent Mode com **Plan → Execute → Verify**, pesquisa web controlada, sugestões inline, ações de edição, RAG, rollback, métricas de desempenho e gerenciamento automático da janela de contexto.
 
 ## Principais recursos
 
-- Chat nativo do VS Code com `@llama`.
+- **Aba própria `llama.cpp` na Activity Bar**, independente do painel do Copilot.
+- Modos **Ask**, **Agent**, **Research** e **Fresh** no mesmo painel.
+- Chat nativo do VS Code com `@llama` mantido como opção compatível.
 - Provider alternável entre `llama.cpp` e OpenAI.
 - Agent Mode com plano operacional público, execução por etapas e verificação final.
 - Tool Host controlado para arquivos, busca, diagnostics, terminal e internet.
 - **Context Budget Manager** para impedir prompts maiores que a janela disponível.
 - Detecção automática de `n_ctx` em servidores llama.cpp compatíveis.
 - Pesquisa detalhada na internet com Brave Search ou SearXNG.
-- Modo `/fresh` para inferência sem histórico anterior.
+- Modo Fresh para inferência sem histórico anterior.
 - Sugestões inline por linguagem/tipo de arquivo.
 - Edição, correção, refatoração, revisão e geração de testes.
 - RAG com BM25, embeddings, busca híbrida e reranking opcional.
@@ -65,6 +67,47 @@ O modelo também não recebe acesso direto ao terminal, VS Code Diagnostics ou s
 5. Execute **Developer: Reload Window** se necessário.
 
 Para desenvolvimento use `Ctrl+F5` para abrir um Extension Development Host sem pausar na primeira linha. `F5` inicia uma sessão de depuração.
+
+---
+
+# Aba própria na Activity Bar
+
+A partir da **v0.13.0**, a experiência principal do llama.cpp Assistant não depende do painel do Copilot.
+
+Clique no ícone **llama.cpp** na Activity Bar ou execute:
+
+```text
+Llama.cpp: Open Assistant Tab
+```
+
+O painel próprio oferece quatro modos:
+
+- **Ask** — chat normal, com histórico opcional, arquivo atual, `@file`, RAG e Context Budget Manager.
+- **Agent** — executa Analyze → Plan → Execute → Verify com as ferramentas controladas do projeto.
+- **Research** — executa Agent Mode com pesquisa web detalhada e fontes.
+- **Fresh** — inferência isolada sem enviar a conversa anterior.
+
+O painel também inclui:
+
+- indicador do provider/modelo atual;
+- toggle de arquivo atual;
+- toggle de histórico para Ask;
+- plano operacional visual do Agent Mode;
+- cancelar solicitação;
+- reindexar RAG;
+- limpar conversa;
+- rollback da última sessão do agente;
+- acesso rápido ao gerenciamento do provider.
+
+O Chat nativo do VS Code continua disponível. Para abrir explicitamente:
+
+```text
+Llama.cpp: Open Native VS Code Chat (@llama)
+```
+
+ou use `@llama` diretamente no Chat do VS Code.
+
+Mais detalhes: [`docs/ACTIVITY_BAR.md`](docs/ACTIVITY_BAR.md).
 
 ---
 
@@ -171,7 +214,7 @@ Exemplo:
 }
 ```
 
-O provider OpenAI pode ser usado por Chat, Agent Mode, function calling, pesquisa controlada e ações de edição.
+O provider OpenAI pode ser usado por Ask, Agent, Research, Chat nativo, function calling e ações de edição.
 
 ## Controle de custos
 
@@ -251,23 +294,50 @@ Para forçar 8192:
 
 ---
 
-# Chat
+# Chat e Ask
 
-Abra:
+Na interface principal, abra a aba **llama.cpp** e selecione **Ask**.
+
+Também pode executar:
 
 ```text
-Llama.cpp: Open Native Chat
+Llama.cpp: Open Assistant Tab
 ```
 
-Uso normal:
+## Inferência sem histórico
+
+Na aba própria, selecione **Fresh**.
+
+No Chat nativo, o equivalente é:
+
+```text
+@llama /fresh explique esta função sem considerar nossa conversa anterior
+```
+
+Globalmente:
+
+```json
+{
+  "llamaCpp.chat.includeHistory": false
+}
+```
+
+Em Ask, o toggle **Usar conversa anterior** controla o histórico por solicitação.
+
+## Arquivo atual e contexto explícito
+
+O toggle **Arquivo atual** controla o envio automático do editor atual e contexto relacionado.
+
+Referências `@arquivo` continuam disponíveis no painel próprio e no Chat clássico.
+
+No Chat nativo, use **Add Context** para anexar arquivos ou seleções explicitamente.
+
+## Chat nativo opcional
+
+A integração anterior continua disponível:
 
 ```text
 @llama explique este código
-```
-
-Comandos disponíveis:
-
-```text
 @llama /fresh
 @llama /agent
 @llama /research
@@ -278,32 +348,6 @@ Comandos disponíveis:
 @llama /refactor
 @llama /codebase
 ```
-
-## Inferência sem histórico
-
-```text
-@llama /fresh explique esta função sem considerar nossa conversa anterior
-```
-
-`/fresh` ignora mensagens anteriores somente nessa inferência. Anexos explícitos, arquivo atual e RAG continuam independentes.
-
-Globalmente:
-
-```json
-{
-  "llamaCpp.chat.includeHistory": false
-}
-```
-
-No Chat clássico existe o checkbox **Usar conversa anterior** para alterar isso por solicitação.
-
-## Arquivo atual e contexto explícito
-
-No Chat clássico, **Arquivo atual** controla o envio automático do arquivo/seleção ativa e editores visíveis.
-
-No Chat nativo, use **Add Context** para anexar arquivos ou seleções explicitamente.
-
-Referências `@arquivo` continuam disponíveis no Chat clássico.
 
 ---
 
@@ -323,7 +367,19 @@ VERIFY
 DONE
 ```
 
-Uso:
+Na aba própria, selecione **Agent** e descreva a tarefa, por exemplo:
+
+```text
+corrija os testes que estão falhando e valide a solução
+```
+
+O comando também abre a interface do agente:
+
+```text
+Llama.cpp: Run Agent
+```
+
+No Chat nativo, continua disponível:
 
 ```text
 @llama /agent corrija os testes que estão falhando e valide a solução
@@ -343,7 +399,7 @@ Plano:
 
 Esse plano:
 
-- é mostrado ao usuário;
+- é mostrado ao usuário na própria aba;
 - contém apenas ações observáveis;
 - não é chain-of-thought;
 - não contém raciocínio privado do modelo;
@@ -476,7 +532,7 @@ Inclui o estado final do plano na resposta do agente.
 - orçamento de contexto em cada chamada;
 - plano público sem exposição de raciocínio privado.
 
-Rollback:
+Rollback pode ser acionado pelo botão da aba ou pelo comando:
 
 ```text
 Llama.cpp: Roll Back Last Agent Changes
@@ -505,22 +561,24 @@ Em janelas pequenas, o Context Budget Manager pode compactar resultados antigos 
 
 # Pesquisa detalhada na internet
 
+Na aba própria, selecione **Research** e informe o assunto.
+
 Ferramentas:
 
 - `web_search` — encontra resultados e snippets;
 - `fetch_url` — lê uma fonte HTTP(S) específica;
 - `research_web` — pesquisa e lê múltiplas fontes.
 
-Exemplo:
+Exemplo no painel próprio:
+
+```text
+pesquise as mudanças mais recentes do llama.cpp server e responda com as fontes
+```
+
+No Chat nativo:
 
 ```text
 @llama /research pesquise as mudanças mais recentes do llama.cpp server e responda com as fontes
-```
-
-Ou:
-
-```text
-@llama /agent pesquise a documentação atual da biblioteca usada neste projeto, compare com nosso código, atualize o necessário e execute os testes
 ```
 
 ## Brave Search
@@ -662,6 +720,13 @@ O Agent Mode registra também transições do plano:
 
 # Troubleshooting
 
+## A aba `llama.cpp` não aparece
+
+1. confirme que a extensão instalada é v0.13.0 ou superior;
+2. execute **Developer: Reload Window**;
+3. abra `Ctrl+Shift+P` e execute **Llama.cpp: Open Assistant Tab**;
+4. confira se o container `llama.cpp` não foi ocultado pelo menu de contexto da Activity Bar.
+
 ## `request (...) exceeds the available context size`
 
 Se ocorrer:
@@ -670,7 +735,7 @@ Se ocorrer:
 2. confira o valor de `n_ctx` no Output Channel;
 3. use `llamaCpp.context.windowTokens` se o servidor reportar limite incorreto;
 4. aumente `--ctx-size` se modelo/hardware permitirem;
-5. use `/fresh` para eliminar histórico imediatamente;
+5. use Fresh para eliminar histórico imediatamente;
 6. reduza RAG/anexos em modelos com contexto muito pequeno.
 
 ## Servidor antigo sem `/props`
@@ -713,7 +778,9 @@ Ctrl+F5
 # Comandos úteis
 
 ```text
-Llama.cpp: Open Native Chat
+Llama.cpp: Open Assistant Tab
+Llama.cpp: Focus Assistant Tab
+Llama.cpp: Open Native VS Code Chat (@llama)
 Llama.cpp: Open Classic Chat
 Llama.cpp: Run Agent
 Llama.cpp: Roll Back Last Agent Changes
