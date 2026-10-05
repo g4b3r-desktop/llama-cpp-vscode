@@ -88,25 +88,27 @@ class OpenAIClient {
     return body;
   }
 
-  async agentTurn({ messages, tools, signal, model, maxOutputTokens }) {
+  async agentTurn({ messages, tools = [], signal, model, maxOutputTokens }) {
     const config = getConfig();
     const startedAt = Date.now();
     const body = {
       model: String(model || config.openai.model || 'gpt-5.6-luna').trim(),
       input: toResponsesInput(messages),
-      tools: toResponsesTools(tools),
-      tool_choice: 'auto',
-      parallel_tool_calls: false,
       max_output_tokens: Math.max(64, Number(maxOutputTokens || config.agent.maxTokensPerStep || 2048)),
       store: Boolean(config.openai.store)
     };
+    if (tools.length) {
+      body.tools = toResponsesTools(tools);
+      body.tool_choice = 'auto';
+      body.parallel_tool_calls = false;
+    }
     const effort = String(config.openai.reasoningEffort || '').trim();
     if (effort) body.reasoning = { effort };
     const data = await requestJson(this.endpoint('/responses'), { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) }, config.request.timeoutMs, signal);
-    this.metricsSink?.emitMetrics('agent', startedAt, Date.now(), normalizeUsagePayload(data));
+    this.metricsSink?.emitMetrics(tools.length ? 'agent' : 'agent-plan', startedAt, Date.now(), normalizeUsagePayload(data));
     const content = extractResponseText(data).trim();
-    let calls = extractFunctionCalls(data);
-    if (!calls.length) {
+    let calls = tools.length ? extractFunctionCalls(data) : [];
+    if (tools.length && !calls.length) {
       const fallback = parseFallbackToolCall(content);
       if (fallback) calls = [fallback];
     }
