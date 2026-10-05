@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.0
+- Adicionada uma aba própria **llama.cpp** na Activity Bar do VS Code, separada do painel de Chat/Copilot.
+- A nova view usa `WebviewViewProvider` e se torna a interface principal para Chat e Agent Mode.
+- Adicionados modos **Ask**, **Agent**, **Research** e **Fresh** diretamente no painel dedicado.
+- Ask reutiliza histórico opcional, arquivo atual, `@file`, RAG e Context Budget Manager.
+- Agent reutiliza o fluxo Plan → Execute → Verify, ToolRegistry, permissões, terminal, diagnostics, backups e rollback existentes.
+- Research executa pesquisa web detalhada pelo Agent Mode sem dar acesso de rede direto ao LLM.
+- O plano operacional público do agente agora é renderizado na própria aba com estados pendente, executando, concluído e falhou.
+- O cabeçalho mostra o provider atual e permite abrir o gerenciamento de llama.cpp/OpenAI.
+- Adicionados botões de cancelar, reindexar RAG, limpar conversa e rollback da última sessão do agente.
+- `Llama.cpp: Open Assistant Tab` abre/foca a nova interface; `Llama.cpp: Open Native VS Code Chat (@llama)` preserva a integração anterior.
+- `Llama.cpp: Run Agent` passa a direcionar para a aba própria.
+- Adicionados ícone dedicado da Activity Bar, estado visual persistente do webview e sincronização segura de inicialização via mensagem `ready`.
+- Adicionados testes para roteamento de modos e isolamento de histórico em Fresh/Agent/Research.
+- Adicionada documentação específica em `docs/ACTIVITY_BAR.md`.
+
 ## 0.12.0
 - Adicionado fluxo **Plan → Execute → Verify** ao Agent Mode.
 - O agente agora gera primeiro um plano operacional público curto, sem expor chain-of-thought, e executa as etapas uma por vez.
