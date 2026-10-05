@@ -1,0 +1,48 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--vscode-font-family); color: var(--vscode-foreground); background: var(--vscode-sideBar-background); }
+#app { display: grid; grid-template-rows: auto auto 1fr auto; height: 100vh; min-height: 0; }
+header { display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--vscode-sideBarSectionHeader-border, var(--vscode-panel-border)); }
+header strong { font-size: 13px; }
+#provider-label { margin-top: 2px; font-size: 11px; opacity: .72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+.icon-button { width: 30px; height: 28px; padding: 0; border-radius: 5px; }
+#messages { min-height: 0; overflow: auto; padding: 10px; }
+.msg { margin: 0 0 10px; padding: 9px 10px; border-radius: 7px; overflow-wrap: anywhere; }
+.msg.user { background: var(--vscode-input-background); white-space: pre-wrap; }
+.msg.assistant { border: 1px solid var(--vscode-panel-border); background: var(--vscode-editor-background); }
+.msg.error { color: var(--vscode-errorForeground); border: 1px solid var(--vscode-inputValidation-errorBorder); }
+.msg.notice { opacity: .82; border-left: 3px solid var(--vscode-textLink-foreground); padding-left: 8px; }
+.message-meta { margin-top: 6px; font-size: 10px; opacity: .65; text-transform: none; }
+#composer { border-top: 1px solid var(--vscode-panel-border); padding: 9px; background: var(--vscode-sideBar-background); }
+.mode-row { display: flex; gap: 6px; margin-bottom: 7px; }
+.mode-row select { flex: 1; }
+select, textarea { color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); font-family: var(--vscode-font-family); }
+select { min-height: 28px; padding: 3px 6px; }
+textarea { width: 100%; min-height: 82px; max-height: 260px; resize: vertical; padding: 8px; }
+.toggle { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 7px; font-size: 11px; opacity: .86; }
+.toggle input { margin: 0; }
+.toggle strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; opacity: .8; }
+.toggle.disabled { opacity: .42; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+button { border: 0; padding: 5px 9px; cursor: pointer; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border-radius: 4px; }
+button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
+button:disabled { opacity: .5; cursor: default; }
+#status { font-size: 10px; opacity: .75; margin-left: auto; }
+.agent-progress { margin: 8px 10px 0; padding: 8px 9px; border: 1px solid var(--vscode-panel-border); border-radius: 7px; background: var(--vscode-editor-background); font-size: 11px; }
+.agent-progress.hidden { display: none; }
+.progress-title { font-weight: 650; margin-bottom: 6px; }
+.plan-step { display: grid; grid-template-columns: 16px 1fr; gap: 5px; padding: 2px 0; opacity: .72; }
+.plan-step.running { opacity: 1; font-weight: 600; }
+.plan-step.completed { opacity: .86; }
+.plan-step.failed { color: var(--vscode-errorForeground); opacity: 1; }
+.markdown-body { line-height: 1.5; }
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+.markdown-body p { margin: .5em 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin: .85em 0 .4em; line-height: 1.25; }
+.markdown-body h1 { font-size: 1.35em; } .markdown-body h2 { font-size: 1.22em; } .markdown-body h3 { font-size: 1.1em; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.45em; margin: .5em 0; }
+.markdown-body code { font-family: var(--vscode-editor-font-family, monospace); font-size: .94em; background: var(--vscode-textCodeBlock-background); border-radius: 3px; padding: .1em .28em; }
+.markdown-body pre { overflow: auto; margin: .6em 0; padding: 9px; background: var(--vscode-textCodeBlock-background); border: 1px solid var(--vscode-panel-border); border-radius: 5px; }
+.markdown-body pre code { background: transparent; padding: 0; white-space: pre; }
+.markdown-body a { color: var(--vscode-textLink-foreground); text-decoration: none; }
