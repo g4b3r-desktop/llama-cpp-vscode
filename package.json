@@ -5,6 +5,7 @@
   "version": "0.13.0",
   "publisher": "local",
   "license": "MIT",
+  "repository": {"type": "git", "url": "https://github.com/g4b3r-desktop/llama-cpp-vscode.git"},
   "engines": {"vscode": "^1.117.0"},
   "categories": ["Machine Learning", "Other"],
   "keywords": ["AI", "agent", "agent mode", "activity bar", "sidebar", "planning", "plan execute verify", "tools", "FIM", "RAG", "autocomplete", "chat participant", "llama", "llama.cpp", "OpenAI", "ChatGPT", "Responses API", "GPT", "local LLM", "native chat", "inline edit", "inline suggestions", "Copilot alternative", "rollback", "web search", "web research", "Brave Search", "SearXNG", "context budget"],
