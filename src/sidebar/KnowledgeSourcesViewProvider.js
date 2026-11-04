@@ -107,6 +107,28 @@ class KnowledgeSourcesViewProvider {
         this.post({ type: 'notice', text: 'Filtros salvos. Reindexando somente os arquivos incluídos…' });
         await this.manager.reindexSource(message.id, true);
         await this.postState();
+      } else if (message?.type === 'files' && typeof message.id === 'string') {
+        const source = (await this.manager.listSources()).find(item => item.id === message.id);
+        if (!source) return;
+        const available = await this.manager.listAvailableFiles(message.id);
+        const selected = source.selectedFiles === null ? null : new Set(source.selectedFiles || []);
+        const items = available.files.map(filename => ({
+          label: filename,
+          description: selected === null || selected.has(filename) ? 'Incluído no RAG' : 'Excluído do RAG',
+          picked: selected === null || selected.has(filename)
+        }));
+        const choice = await vscode.window.showQuickPick(items, {
+          title: 'Arquivos usados pelo RAG · ' + source.name,
+          placeHolder: 'Selecione os arquivos que a IA poderá consultar',
+          canPickMany: true,
+          ignoreFocusOut: true
+        });
+        if (!choice) return;
+        const selectedFiles = choice.map(item => item.label);
+        await this.manager.configureSelectedFiles(message.id, selectedFiles);
+        this.post({ type: 'notice', text: selectedFiles.length + ' arquivo(s) selecionado(s). Reindexando a fonte…' });
+        await this.manager.reindexSource(message.id, true);
+        await this.postState();
       } else if (message?.type === 'reindex' && typeof message.id === 'string') {
         await this.manager.reindexSource(message.id, true);
         await this.postState();
