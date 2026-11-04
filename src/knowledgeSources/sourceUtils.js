@@ -106,10 +106,28 @@ function buildSourceIncludeGlob(source) {
   return prefix + '.{' + extensions.join(',') + '}';
 }
 
+function normalizeSelectedFiles(values) {
+  if (values === null || values === undefined) return null;
+  if (!Array.isArray(values)) throw new Error('Selected files must be an array or null.');
+  const normalized = [...new Set(values.map(value => normalizeRelative(value).trim()).filter(Boolean))].sort();
+  for (const filename of normalized) {
+    if (!isSafeDocumentPath(filename) || isSensitiveFilename(filename)) {
+      throw new Error('Invalid selected document path: ' + filename);
+    }
+  }
+  return normalized;
+}
+
+function matchesSelectedFile(filename, source) {
+  const selected = normalizeSelectedFiles(source.selectedFiles);
+  return selected === null || selected.includes(normalizeRelative(filename));
+}
+
 function sourceFiltersFingerprint(source) {
   const value = JSON.stringify({
     includeDirectories: normalizeSourceDirectories(source.includeDirectories || []).slice().sort(),
-    extensions: normalizeSourceExtensions(source.extensions).slice().sort()
+    extensions: normalizeSourceExtensions(source.extensions).slice().sort(),
+    selectedFiles: normalizeSelectedFiles(source.selectedFiles)
   });
   return crypto.createHash('sha256').update(value).digest('hex');
 }
@@ -128,5 +146,5 @@ module.exports = {
   isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative,
   isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS,
   normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob,
-  sourceFiltersFingerprint, matchesSourceFilter
+  sourceFiltersFingerprint, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile
 };
