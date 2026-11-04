@@ -674,7 +674,7 @@ class KnowledgeSourcesManager {
             concurrency,
             signal,
             processBatch: batch => this.client.embed(
-              this.embeddingInput(source, chunk.filename, chunk, maxCharacters),
+              batch.map(chunk => this.embeddingInput(source, chunk.filename, chunk, maxCharacters)),
               signal
             ),
             onBatchSuccess: (batch, vectors) => {
@@ -865,7 +865,7 @@ class KnowledgeSourcesManager {
       concurrency,
       signal,
       processBatch: batch => this.client.embed(
-        this.embeddingInput(source, chunk.filename, chunk, maxCharacters),
+        batch.map(chunk => this.embeddingInput(source, chunk.filename, chunk, maxCharacters)),
         signal
       ),
       onBatchSuccess: (batch, vectors) => {
