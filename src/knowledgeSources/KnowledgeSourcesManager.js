@@ -403,6 +403,9 @@ class KnowledgeSourcesManager {
     const source = this.requireSource(sourceId);
     source.includeDirectories = normalizeSourceDirectories(options.includeDirectories || []);
     source.extensions = normalizeSourceExtensions(options.extensions || []);
+    if (Array.isArray(source.selectedFiles)) {
+      source.selectedFiles = normalizeSelectedFiles(source.selectedFiles.filter(filename => matchesSourceFilter(filename, source)));
+    }
     await this.clearEmbeddingCheckpoint(source.id);
     source.needsFilterRefresh = true;
     source.status = 'stale';
