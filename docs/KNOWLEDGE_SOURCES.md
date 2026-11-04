@@ -54,7 +54,7 @@ A alteração da configuração de chunking invalida o parser fingerprint e prov
 
 Cada fonte possui o botão **Filtros**. Informe diretórios relativos separados por vírgula (por exemplo, `docs, manual`); vazio inclui todas as pastas. Informe também as extensões aceitas (por exemplo, `html, htm, md, mdx`). As extensões precisam estar entre os formatos textuais suportados pela extensão. Os filtros são salvos por fonte e aplicados na indexação e no watcher.
 
-O botão **Arquivos** abre a lista de documentos encontrados dentro desses filtros. Selecione individualmente os arquivos que poderão alimentar o RAG. A seleção é persistida por fonte; arquivos não selecionados são removidos do índice ativo e não entram na recuperação. Para voltar a usar todos os arquivos compatíveis, selecione todos na lista. A seleção também limita a preservação de documentos durante reindexações parciais.
+O botão **Arquivos** abre a lista de documentos encontrados dentro desses filtros. Selecione individualmente os arquivos que poderão alimentar o RAG. A seleção é persistida por fonte; arquivos não selecionados são removidos do índice ativo e não entram na recuperação. Para voltar a usar todos os arquivos compatíveis, marque **Todos os arquivos compatíveis** na lista. A seleção também limita a preservação de documentos durante reindexações parciais.
 
 A interface mostra a fase atual, arquivos lidos, embeddings concluídos, lotes e concorrência. A concorrência é limitada a 4 pelo código e deve ser aumentada gradualmente; em GPUs com pouca VRAM, mantenha 1.
 
