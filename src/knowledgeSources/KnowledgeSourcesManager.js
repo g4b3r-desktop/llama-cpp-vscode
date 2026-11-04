@@ -183,6 +183,10 @@ class KnowledgeSourcesManager {
     // Ignore a trailing partial JSONL record left by a process crash; all earlier newline-terminated records remain reusable.
     const lastNewline = content.lastIndexOf('\n');
     const completeContent = lastNewline >= 0 ? content.slice(0, lastNewline) : '';
+    if (lastNewline < 0 || lastNewline < content.length - 1) {
+      // Remove a truncated final write so the next append starts on a fresh JSONL line.
+      await fs.writeFile(uri.fsPath, lastNewline >= 0 ? content.slice(0, lastNewline + 1) : '', 'utf8');
+    }
     const lines = completeContent.split(/\r?\n/);
     let header;
     try { header = JSON.parse(lines.shift() || ''); } catch { header = null; }
