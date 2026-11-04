@@ -19,12 +19,18 @@ function registerCoreTools(registry, services) {
       inputSchema: objectSchema({
         query: stringProp('Technical question or concepts to retrieve from local documentation.'),
         source_ids: { type: 'array', items: { type: 'string' }, description: 'Optional Knowledge Source IDs to restrict the search.' },
+        directories: { type: 'array', items: { type: 'string' }, description: 'Optional relative directory prefixes to restrict matching documentation files.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Optional source tags. A source matches when it has at least one requested tag.' },
+        recent_days: numberProp('Optional limit to files modified within the last N days.'),
         top_k: numberProp('Maximum number of relevant chunks to return.')
       }, ['query']),
       actionLabel: args => `Consultando documentação local: ${truncate(args.query, 90)}...`,
       handler: async (args, context) => {
         const chunks = await knowledgeSearch(args.query, {
           sourceIds: Array.isArray(args.source_ids) ? args.source_ids : undefined,
+          directories: Array.isArray(args.directories) ? args.directories : undefined,
+          tags: Array.isArray(args.tags) ? args.tags : undefined,
+          recentDays: Number(args.recent_days) > 0 ? Number(args.recent_days) : undefined,
           topK: Math.max(1, Math.min(12, Number(args.top_k) || 6)),
           signal: context.signal,
           includeWorkspace: false
