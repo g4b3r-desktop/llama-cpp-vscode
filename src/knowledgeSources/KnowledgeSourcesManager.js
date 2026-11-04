@@ -707,9 +707,7 @@ class KnowledgeSourcesManager {
             onWaveComplete: async batchProgress => {
               // Append only the completed vectors; do not rewrite the full multi-megabyte index per batch.
               const checkpointStartedAt = Date.now();
-              const checkpointStartedAt = Date.now();
-        await this.appendEmbeddingCheckpoint(source, checkpointQueue.splice(0));
-        checkpointPersistenceMs += elapsedMs(checkpointStartedAt);
+              await this.appendEmbeddingCheckpoint(source, checkpointQueue.splice(0));
               timings.checkpoint_persistence += elapsedMs(checkpointStartedAt);
               chunks = this.flattenDocuments(source, nextDocuments);
               this.indexes.set(source.id, chunks);
@@ -908,7 +906,9 @@ class KnowledgeSourcesManager {
         }
       },
       onWaveComplete: async batchProgress => {
+        const checkpointStartedAt = Date.now();
         await this.appendEmbeddingCheckpoint(source, checkpointQueue.splice(0));
+        checkpointPersistenceMs += elapsedMs(checkpointStartedAt);
         chunks = this.flattenDocuments(source, documents);
         this.indexes.set(source.id, chunks);
         source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
