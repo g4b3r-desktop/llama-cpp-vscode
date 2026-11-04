@@ -22,7 +22,7 @@ async function runEmbeddingBatches(items, options = {}) {
   for (let offset = 0; offset < batches.length; offset += concurrency) {
     if (options.signal?.aborted) throw abortError();
     const wave = batches.slice(offset, offset + concurrency);
-    const settled = await Promise.allSettled(wave.map(batch => options.processBatch(batch.items, batch.index)));
+    const settled = await Promise.allSettled(wave.map(batch => Promise.resolve().then(() => options.processBatch(batch.items, batch.index))));
     let firstError;
 
     for (let index = 0; index < settled.length; index += 1) {
