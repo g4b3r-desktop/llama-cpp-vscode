@@ -3,7 +3,8 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const { parseDocument, htmlToStructuredText, chunkParagraphs } = require('../src/knowledgeSources/KnowledgeDocumentParser');
-const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId } = require('../src/knowledgeSources/sourceUtils');
+const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, matchesSourceFilter } = require('../src/knowledgeSources/sourceUtils');
+const { runEmbeddingBatches } = require('../src/knowledgeSources/embeddingQueue');
 const { reciprocalRankFusion, diversifyResults } = require('../src/knowledgeSources/retrievalUtils');
 
 test('HTML extraction removes executable/layout noise and preserves headings and links', () => {
@@ -111,4 +112,72 @@ test('retrieval diversification limits domination by a single source', () => {
   assert.equal(selected.length, 6);
   assert.ok(selected.filter(item => item.sourceId === 'threejs').length <= 4);
   assert.ok(selected.some(item => item.sourceId === 'python'));
+});
+
+
+test('per-source filters normalize supported extensions and constrain directories', () => {
+  assert.deepEqual(normalizeSourceExtensions(['.MD', 'html', 'md']), ['md', 'html']);
+  assert.deepEqual(normalizeSourceDirectories(['./docs/', 'manual/api\\\\']), ['docs', 'manual/api']);
+  assert.equal(
+    buildSourceIncludeGlob({ includeDirectories: ['docs', 'manual'], extensions: ['md', '.html'] }),
+    '**/{docs,manual}/**/*.{md,html}'
+  );
+  assert.equal(
+    buildSourceIncludeGlob({ includeDirectories: ['docs/manual'], extensions: ['md'] }),
+    '**/docs/manual/**/*.{md}'
+  );
+  assert.equal(matchesSourceFilter('packages/three/docs/api/GLTFLoader.html', {
+    includeDirectories: ['docs'], extensions: ['html', 'md']
+  }), true);
+  assert.equal(matchesSourceFilter('packages/three/src/GLTFLoader.js', {
+    includeDirectories: ['docs'], extensions: ['html', 'md']
+  }), false);
+  assert.throws(() => normalizeSourceDirectories(['../secrets']), /Invalid include directory/);
+  assert.throws(() => normalizeSourceDirectories(['docs/*']), /Invalid include directory/);
+  assert.throws(() => normalizeSourceExtensions(['exe']), /Unsupported document extension/);
+});
+
+test('embedding queue respects configured concurrency and checkpoints each completed wave', async () => {
+  const items = [1, 2, 3, 4, 5];
+  let active = 0;
+  let maxActive = 0;
+  const persisted = [];
+  const waves = [];
+  const result = await runEmbeddingBatches(items, {
+    batchSize: 2,
+    concurrency: 2,
+    processBatch: async batch => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      active -= 1;
+      return batch.map(value => [value, value + 1]);
+    },
+    onBatchSuccess: async (batch, vectors) => persisted.push(...batch.map((value, index) => ({ value, vector: vectors[index] }))),
+    onWaveComplete: async progress => waves.push(progress)
+  });
+  assert.equal(maxActive, 2);
+  assert.equal(result.completedBatches, 3);
+  assert.equal(result.completedItems, 5);
+  assert.deepEqual(waves.map(progress => progress.completedBatches), [2, 3]);
+  assert.equal(persisted.length, 5);
+});
+
+test('embedding queue checkpoints successful work before surfacing a failed batch', async () => {
+  const persisted = [];
+  const checkpoints = [];
+  await assert.rejects(runEmbeddingBatches([1, 2, 3], {
+    batchSize: 1,
+    concurrency: 2,
+    processBatch: async batch => {
+      if (batch[0] === 2) throw new Error('simulated embedding failure');
+      return [[batch[0]]];
+    },
+    onBatchSuccess: async (batch, vectors) => persisted.push({ item: batch[0], vector: vectors[0] }),
+    onWaveComplete: async progress => checkpoints.push(progress)
+  }), /simulated embedding failure/);
+  assert.deepEqual(persisted, [{ item: 1, vector: [1] }]);
+  assert.equal(checkpoints.length, 1);
+  assert.equal(checkpoints[0].completedItems, 1);
+  assert.equal(checkpoints[0].completedBatches, 2);
 });
