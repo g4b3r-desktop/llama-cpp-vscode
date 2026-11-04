@@ -84,7 +84,8 @@
         ? source.includeDirectories.join(', ')
         : 'todas as pastas';
       const extensions = Array.isArray(source.extensions) ? source.extensions.join(', ') : '';
-      filters.textContent = 'Pastas: ' + directories + ' · Extensões: ' + extensions;
+      filters.textContent = 'Pastas: ' + directories + ' · Extensões: ' + extensions +
+        ' · Arquivos: ' + (source.selectedFileCount === null ? 'todos os compatíveis' : source.selectedFileCount + ' selecionados');
 
       let progress = null;
       if (source.indexing && source.progress) {
@@ -114,11 +115,13 @@
       enabledLabel.append(checkbox, label);
       controls.append(enabledLabel);
       const filtersButton = makeButton('Filtros', 'filters', source.id, true);
+      const filesButton = makeButton('Arquivos (' + (source.selectedFileCount === null ? 'todos' : source.selectedFileCount) + ')', 'files', source.id, true);
       const reindex = makeButton(source.indexing ? 'Indexando…' : 'Reindexar', 'reindex', source.id, true);
       reindex.disabled = Boolean(source.indexing || source.status === 'indexing');
       filtersButton.disabled = Boolean(source.indexing || source.status === 'indexing');
+      filesButton.disabled = Boolean(source.indexing || source.status === 'indexing');
       const remove = makeButton('Remover', 'remove', source.id, true);
-      controls.append(filtersButton, reindex, remove);
+      controls.append(filtersButton, filesButton, reindex, remove);
 
       card.append(heading, root, stats, updated, filters);
       if (progress) card.appendChild(progress);
