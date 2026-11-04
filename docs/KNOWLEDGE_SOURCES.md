@@ -52,7 +52,7 @@ A alteração da configuração de chunking invalida o parser fingerprint e prov
 - llamaCpp.rag.embedding.concurrency: lotes simultâneos; o padrão é 1 para limitar pressão na VRAM.
 - llamaCpp.rag.embedding.maxCharacters: limite de caracteres por texto enviado ao modelo de embeddings.
 
-Cada fonte possui o botão **Filtros**. Informe diretórios relativos separados por vírgula (por exemplo, `docs, manual`); vazio inclui todas as pastas. Informe também as extensões aceitas (por exemplo, `html, htm, md, mdx`). As extensões precisam estar entre os formatos textuais suportados pela extensão. Os filtros são salvos por fonte e aplicados na indexação e no watcher.
+Cada fonte possui o botão **Pastas e tipos**. Informe diretórios relativos separados por vírgula (por exemplo, `docs, manual`); vazio inclui todas as pastas. Em seguida, marque em uma lista as extensões que devem ser indexadas (por exemplo, `.html`, `.md`, `.js`, `.ts`). A lista contém somente os formatos textuais suportados pela extensão e permite selecionar vários tipos ao mesmo tempo. Essa configuração é independente para cada Knowledge Source e é aplicada na descoberta de arquivos, indexação e watcher. Se os tipos forem alterados, a seleção individual de arquivos é mantida somente para os caminhos que continuam compatíveis.
 
 O botão **Arquivos** abre a lista de documentos encontrados dentro desses filtros. Selecione individualmente os arquivos que poderão alimentar o RAG. A seleção é persistida por fonte; arquivos não selecionados são removidos do índice ativo e não entram na recuperação. Para voltar a usar todos os arquivos compatíveis, marque **Todos os arquivos compatíveis** na lista. A seleção também limita a preservação de documentos durante reindexações parciais.
 
