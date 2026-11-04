@@ -2,6 +2,13 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
+const DEFAULT_SOURCE_EXTENSIONS = Object.freeze([
+  'html','htm','md','mdx','txt','json','jsonc','js','jsx','mjs','cjs','ts','tsx',
+  'py','java','c','cc','cpp','h','hpp','cs','go','rs','php','rb','swift','kt',
+  'kts','scala','sh','bash','zsh','lua','vue','svelte','css','scss','less','xml',
+  'yaml','yml','sql','graphql','gql','proto'
+]);
+
 function isValidSourceId(value) {
   return typeof value === 'string' && /^[a-f0-9]{24}$/.test(value);
 }
@@ -62,22 +69,9 @@ function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-
-const DEFAULT_SOURCE_EXTENSIONS = Object.freeze([
-  'html','htm','md','mdx','txt','json','jsonc','js','jsx','mjs','cjs','ts','tsx',
-  'py','java','c','cc','cpp','h','hpp','cs','go','rs','php','rb','swift','kt',
-  'kts','scala','sh','bash','zsh','lua','vue','svelte','css','scss','less','xml',
-  'yaml','yml','sql','graphql','gql','proto'
-]);
-
 function normalizeSourceExtensions(values) {
   const items = Array.isArray(values) ? values : String(values || '').split(',');
-  const normalized = [...new Set(items.map(value => {
-    let directory = String(value || '').trim().replaceAll('\\', '/');
-    if (directory.startsWith('./')) directory = directory.slice(2);
-    while (directory.endsWith('/')) directory = directory.slice(0, -1);
-    return directory;
-  }).filter(Boolean))];
+  const normalized = [...new Set(items.map(value => String(value || '').trim().replace(/^\.+/, '').toLowerCase()).filter(Boolean))];
   if (!normalized.length) return [...DEFAULT_SOURCE_EXTENSIONS];
   const allowed = new Set(DEFAULT_SOURCE_EXTENSIONS);
   const invalid = normalized.filter(value => !/^[a-z0-9]{1,10}$/.test(value) || !allowed.has(value));
@@ -87,7 +81,12 @@ function normalizeSourceExtensions(values) {
 
 function normalizeSourceDirectories(values) {
   const items = Array.isArray(values) ? values : String(values || '').split(',');
-  const normalized = [...new Set(items.map(value => String(value || '').trim().replace(/\\\\/g, '/').replace(/^\.\\//, '').replace(/\\/+$/, '')).filter(Boolean))];
+  const normalized = [...new Set(items.map(value => {
+    let directory = String(value || '').trim().replaceAll('\\\\', '/');
+    if (directory.startsWith('./')) directory = directory.slice(2);
+    while (directory.endsWith('/')) directory = directory.slice(0, -1);
+    return directory;
+  }).filter(Boolean))];
   for (const directory of normalized) {
     if (path.posix.isAbsolute(directory) || path.win32.isAbsolute(directory)
       || directory.split('/').some(segment => !segment || segment === '.' || segment === '..')
@@ -127,4 +126,9 @@ function matchesSourceFilter(filename, source) {
   });
 }
 
-module.exports = { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter };
+module.exports = {
+  isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative,
+  isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS,
+  normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob,
+  sourceFiltersFingerprint, matchesSourceFilter
+};
