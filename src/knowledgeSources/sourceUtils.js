@@ -82,7 +82,7 @@ function normalizeSourceExtensions(values) {
 function normalizeSourceDirectories(values) {
   const items = Array.isArray(values) ? values : String(values || '').split(',');
   const normalized = [...new Set(items.map(value => {
-    let directory = String(value || '').trim().replaceAll(String.fromCharCode(92), '/');
+    let directory = String(value || '').trim().split(String.fromCharCode(92)).join('/');
     if (directory.startsWith('./')) directory = directory.slice(2);
     while (directory.endsWith('/')) directory = directory.slice(0, -1);
     return directory;
@@ -90,7 +90,7 @@ function normalizeSourceDirectories(values) {
   for (const directory of normalized) {
     if (path.posix.isAbsolute(directory) || path.win32.isAbsolute(directory)
       || directory.split('/').some(segment => !segment || segment === '.' || segment === '..')
-      || !directory.split('/').every(segment => /^[\\p{L}\\p{N}._ -]+$/u.test(segment))
+      || directory.split('/').some(segment => ['*', '?', '[', ']', '{', '}', '#', '!', ':'].some(character => segment.includes(character)))
       || directory.length > 200) {
       throw new Error('Invalid include directory: ' + directory);
     }
