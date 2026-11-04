@@ -25,6 +25,7 @@ class KnowledgeSourcesManager {
     this.pendingRefresh = new Set();
     this.indexing = new Map();
     this.embeddingRefresh = new Map();
+    this.checkpointReady = new Set();
     this.controllers = new Map();
     this.catalogWrite = Promise.resolve();
     this.emitter = new vscode.EventEmitter();
@@ -126,6 +127,113 @@ class KnowledgeSourcesManager {
     return vscode.Uri.joinPath(this.storageUri, 'knowledge-sources', sourceId + '.index.json');
   }
 
+  checkpointUri(sourceId) {
+    if (!this.storageUri) return undefined;
+    return vscode.Uri.joinPath(this.storageUri, 'knowledge-sources', sourceId + '.embeddings.jsonl');
+  }
+
+  checkpointHeader(source) {
+    return {
+      type: 'meta',
+      version: 1,
+      sourceId: source.id,
+      rootUri: source.rootUri,
+      embeddingFingerprint: embeddingFingerprint(),
+      parserFingerprint: parserFingerprint(),
+      filtersFingerprint: sourceFiltersFingerprint(source)
+    };
+  }
+
+  async ensureEmbeddingCheckpoint(source) {
+    if (this.checkpointReady.has(source.id)) return;
+    const uri = this.checkpointUri(source.id);
+    if (!uri) return;
+    const expected = this.checkpointHeader(source);
+    let valid = false;
+    try {
+      const firstLine = (await fs.readFile(uri.fsPath, 'utf8')).split(/\\r?\\n/, 1)[0];
+      const current = JSON.parse(firstLine);
+      valid = current?.type === 'meta'
+        && current.sourceId === expected.sourceId
+        && current.rootUri === expected.rootUri
+        && current.embeddingFingerprint === expected.embeddingFingerprint
+        && current.parserFingerprint === expected.parserFingerprint
+        && current.filtersFingerprint === expected.filtersFingerprint;
+    } catch (error) {
+      if (error.code !== 'ENOENT') this.output?.appendLine('[knowledge-sources] checkpoint header read failed: ' + error.message);
+    }
+    if (!valid) {
+      await fs.mkdir(path.dirname(uri.fsPath), { recursive: true });
+      await fs.writeFile(uri.fsPath, JSON.stringify(expected) + '\\n', 'utf8');
+    }
+    this.checkpointReady.add(source.id);
+  }
+
+  async loadEmbeddingCheckpoint(source, documents) {
+    const uri = this.checkpointUri(source.id);
+    if (!uri) return 0;
+    let content;
+    try {
+      content = await fs.readFile(uri.fsPath, 'utf8');
+    } catch (error) {
+      if (error.code !== 'ENOENT') this.output?.appendLine('[knowledge-sources] checkpoint read failed for ' + source.name + ': ' + error.message);
+      return 0;
+    }
+    const lines = content.split(/\\r?\\n/);
+    let header;
+    try { header = JSON.parse(lines.shift() || ''); } catch { header = null; }
+    const expected = this.checkpointHeader(source);
+    const validHeader = header?.type === 'meta'
+      && header.sourceId === expected.sourceId
+      && header.rootUri === expected.rootUri
+      && header.embeddingFingerprint === expected.embeddingFingerprint
+      && header.parserFingerprint === expected.parserFingerprint
+      && header.filtersFingerprint === expected.filtersFingerprint;
+    if (!validHeader) {
+      await this.clearEmbeddingCheckpoint(source.id);
+      return 0;
+    }
+
+    const chunksById = new Map();
+    for (const document of Object.values(documents)) {
+      for (const chunk of document.chunks || []) chunksById.set(chunk.id, chunk);
+    }
+    let applied = 0;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const record = JSON.parse(line);
+        for (const item of Array.isArray(record?.items) ? record.items : []) {
+          const target = chunksById.get(item?.id);
+          const vector = item?.vector;
+          if (!target || !Array.isArray(vector) || !vector.length || !vector.every(value => typeof value === 'number' && Number.isFinite(value))) continue;
+          if (source.embeddingDimension && vector.length !== source.embeddingDimension) continue;
+          target.vector = vector;
+          if (!source.embeddingDimension) source.embeddingDimension = vector.length;
+          applied += 1;
+        }
+      } catch (error) {
+        this.output?.appendLine('[knowledge-sources] ignoring incomplete embedding checkpoint line: ' + error.message);
+      }
+    }
+    this.checkpointReady.add(source.id);
+    return applied;
+  }
+
+  async appendEmbeddingCheckpoint(source, items) {
+    if (!Array.isArray(items) || !items.length) return;
+    await this.ensureEmbeddingCheckpoint(source);
+    const uri = this.checkpointUri(source.id);
+    if (!uri) return;
+    await fs.appendFile(uri.fsPath, JSON.stringify({ items }) + '\\n', 'utf8');
+  }
+
+  async clearEmbeddingCheckpoint(sourceId) {
+    const uri = this.checkpointUri(sourceId);
+    this.checkpointReady.delete(sourceId);
+    if (uri) await fs.unlink(uri.fsPath).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  }
+
   async loadIndex(source) {
     const uri = this.cacheUri(source.id);
     if (!uri) return false;
@@ -157,6 +265,12 @@ class KnowledgeSourcesManager {
       if (refreshVectors) {
         for (const chunk of chunks) delete chunk.vector;
         for (const document of Object.values(documents)) for (const chunk of document.chunks || []) delete chunk.vector;
+        await this.clearEmbeddingCheckpoint(source.id);
+      } else if (source.needsRechunk || source.needsFilterRefresh) {
+        await this.clearEmbeddingCheckpoint(source.id);
+      } else {
+        await this.loadEmbeddingCheckpoint(source, documents);
+        chunks = this.flattenDocuments(source, documents);
       }
       this.documents.set(source.id, documents);
       this.indexes.set(source.id, chunks);
@@ -192,7 +306,7 @@ class KnowledgeSourcesManager {
     const data = new TextEncoder().encode(JSON.stringify(payload));
     const maxBytes = Math.max(16, Number(getConfig().rag.knowledgeSources.maxCacheMegabytes || 1024)) * 1024 * 1024;
     if (data.byteLength > maxBytes) {
-      throw new Error('Knowledge Source cache exceeds llamaCpp.rag.cache.maxMegabytes. Increase the limit or reduce the source size.');
+      throw new Error('Knowledge Source cache exceeds llamaCpp.rag.knowledgeSources.maxCacheMegabytes. Increase the limit or reduce the source size.');
     }
     const temporary = vscode.Uri.joinPath(this.storageUri, 'knowledge-sources', source.id + '.index.tmp');
     await vscode.workspace.fs.writeFile(temporary, data);
