@@ -101,7 +101,8 @@ function normalizeSourceDirectories(values) {
 function buildSourceIncludeGlob(source) {
   const extensions = normalizeSourceExtensions(source.extensions);
   const directories = normalizeSourceDirectories(source.includeDirectories || []);
-  const prefix = directories.length ? '**/{' + directories.join(',') + '}/**/*' : '**/*';
+  const directoryPattern = directories.length === 1 ? '**/' + directories[0] + '/**/*' : directories.length ? '**/{' + directories.join(',') + '}/**/*' : '**/*';
+  const prefix = directoryPattern;
   return prefix + '.{' + extensions.join(',') + '}';
 }
 
