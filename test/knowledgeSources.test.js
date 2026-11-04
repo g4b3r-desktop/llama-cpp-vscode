@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const { parseDocument, htmlToStructuredText, chunkParagraphs } = require('../src/knowledgeSources/KnowledgeDocumentParser');
-const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, matchesSourceFilter } = require('../src/knowledgeSources/sourceUtils');
+const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile, sourceFiltersFingerprint } = require('../src/knowledgeSources/sourceUtils');
 const { runEmbeddingBatches } = require('../src/knowledgeSources/embeddingQueue');
 const { reciprocalRankFusion, diversifyResults } = require('../src/knowledgeSources/retrievalUtils');
 
@@ -138,6 +138,20 @@ test('per-source filters normalize supported extensions and constrain directorie
   assert.throws(() => normalizeSourceDirectories(['../secrets']), /Invalid include directory/);
   assert.throws(() => normalizeSourceDirectories(['docs/*']), /Invalid include directory/);
   assert.throws(() => normalizeSourceExtensions(['exe']), /Unsupported document extension/);
+});
+
+test('per-source file selection is normalized, exact and included in the filter fingerprint', () => {
+  const selected = normalizeSelectedFiles(['docs/api.html', 'docs/intro.md', 'docs/api.html']);
+  assert.deepEqual(selected, ['docs/api.html', 'docs/intro.md']);
+  assert.equal(matchesSelectedFile('docs/api.html', { selectedFiles: selected }), true);
+  assert.equal(matchesSelectedFile('docs/private.md', { selectedFiles: selected }), false);
+  assert.equal(matchesSelectedFile('docs/private.md', { selectedFiles: null }), true);
+  assert.throws(() => normalizeSelectedFiles(['../outside.md']), /Invalid selected document path/);
+  assert.throws(() => normalizeSelectedFiles(['/etc/passwd']), /Invalid selected document path/);
+  assert.notEqual(
+    sourceFiltersFingerprint({ includeDirectories: [], extensions: ['md'], selectedFiles: ['docs/a.md'] }),
+    sourceFiltersFingerprint({ includeDirectories: [], extensions: ['md'], selectedFiles: ['docs/b.md'] })
+  );
 });
 
 test('embedding queue respects configured concurrency and checkpoints each completed wave', async () => {
