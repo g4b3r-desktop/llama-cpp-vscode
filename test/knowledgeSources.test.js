@@ -120,17 +120,20 @@ test('per-source filters normalize supported extensions and constrain directorie
   assert.deepEqual(normalizeSourceDirectories(['./docs/', 'manual/api\\\\']), ['docs', 'manual/api']);
   assert.equal(
     buildSourceIncludeGlob({ includeDirectories: ['docs', 'manual'], extensions: ['md', '.html'] }),
-    '**/{docs,manual}/**/*.{md,html}'
+    '{docs,manual}/**/*.{md,html}'
   );
   assert.equal(
     buildSourceIncludeGlob({ includeDirectories: ['docs/manual'], extensions: ['md'] }),
-    '**/docs/manual/**/*.{md}'
+    'docs/manual/**/*.{md}'
   );
   assert.equal(matchesSourceFilter('packages/three/docs/api/GLTFLoader.html', {
-    includeDirectories: ['docs'], extensions: ['html', 'md']
+    includeDirectories: ['packages/three/docs'], extensions: ['html', 'md']
   }), true);
   assert.equal(matchesSourceFilter('packages/three/src/GLTFLoader.js', {
-    includeDirectories: ['docs'], extensions: ['html', 'md']
+    includeDirectories: ['packages/three/docs'], extensions: ['html', 'md']
+  }), false);
+  assert.equal(matchesSourceFilter('other/docs/api.html', {
+    includeDirectories: ['packages/three/docs'], extensions: ['html']
   }), false);
   assert.throws(() => normalizeSourceDirectories(['../secrets']), /Invalid include directory/);
   assert.throws(() => normalizeSourceDirectories(['docs/*']), /Invalid include directory/);
