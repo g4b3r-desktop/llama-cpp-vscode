@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { getConfig } = require('../config');
 const { parseDocument } = require('./KnowledgeDocumentParser');
 const { tokenize } = require('../workspaceIndex');
-const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter } = require('./sourceUtils');
+const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile } = require('./sourceUtils');
 const { runEmbeddingBatches } = require('./embeddingQueue');
 
 const INDEX_VERSION = 1;
@@ -65,6 +65,7 @@ class KnowledgeSourcesManager {
             enabled: !rootError && item.enabled !== false,
             includeDirectories: normalizeSourceDirectories(item.includeDirectories || []),
             extensions: normalizeSourceExtensions(item.extensions || DEFAULT_SOURCE_EXTENSIONS),
+            selectedFiles: normalizeSelectedFiles(item.selectedFiles),
             progress: null,
             needsFilterRefresh: false,
             createdAt: item.createdAt || new Date().toISOString(),
@@ -106,6 +107,7 @@ class KnowledgeSourcesManager {
           enabled: source.enabled,
           includeDirectories: source.includeDirectories || [],
           extensions: source.extensions || DEFAULT_SOURCE_EXTENSIONS,
+          selectedFiles: source.selectedFiles === null ? null : (source.selectedFiles || []),
           createdAt: source.createdAt,
           updatedAt: source.updatedAt,
           lastIndexedAt: source.lastIndexedAt,
@@ -345,6 +347,7 @@ class KnowledgeSourcesManager {
       enabled: true,
       includeDirectories: [],
       extensions: [...DEFAULT_SOURCE_EXTENSIONS],
+      selectedFiles: null,
       progress: null,
       needsFilterRefresh: false,
       createdAt: now,
@@ -407,6 +410,51 @@ class KnowledgeSourcesManager {
     source.updatedAt = new Date().toISOString();
     this.disposeWatcher(source.id);
     this.setupWatcher(source);
+    await this.persistCatalog();
+    this.emitChanged();
+    return this.summarize(source);
+  }
+
+  async listAvailableFiles(sourceId) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    const rootUri = vscode.Uri.parse(source.rootUri);
+    const include = new vscode.RelativePattern(rootUri, buildSourceIncludeGlob(source));
+    const exclude = new vscode.RelativePattern(rootUri, EXCLUDE_GLOB);
+    const limit = Math.max(1, Number(getConfig().rag.knowledgeSources.maxFiles || 2000));
+    const found = await vscode.workspace.findFiles(include, exclude, limit + 1);
+    const rootReal = await fs.realpath(source.rootPath);
+    const files = [];
+    for (const uri of found.slice(0, limit)) {
+      const filename = normalizeRelative(path.relative(source.rootPath, uri.fsPath));
+      if (!filename || !isSafeDocumentPath(filename) || isSensitiveFilename(filename)
+        || !matchesSourceFilter(filename, source)) continue;
+      try {
+        const realPath = await fs.realpath(uri.fsPath);
+        if (!isInside(rootReal, realPath)) continue;
+        const stat = await fs.stat(realPath);
+        if (stat.isFile() && stat.size <= getConfig().rag.knowledgeSources.maxFileBytes) files.push(filename);
+      } catch {}
+    }
+    return { files: files.sort(), truncated: found.length > limit };
+  }
+
+  async configureSelectedFiles(sourceId, selectedFiles) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    const normalized = normalizeSelectedFiles(selectedFiles);
+    if (normalized !== null) {
+      const available = await this.listAvailableFiles(sourceId);
+      const allowed = new Set(available.files);
+      const invalid = normalized.filter(filename => !allowed.has(filename) || !matchesSourceFilter(filename, source));
+      if (invalid.length) throw new Error('Selected files are outside the source filters or unavailable: ' + invalid.slice(0, 5).join(', '));
+    }
+    source.selectedFiles = normalized;
+    await this.clearEmbeddingCheckpoint(source.id);
+    source.needsFilterRefresh = true;
+    source.status = 'stale';
+    source.error = null;
+    source.updatedAt = new Date().toISOString();
     await this.persistCatalog();
     this.emitChanged();
     return this.summarize(source);
@@ -508,7 +556,8 @@ class KnowledgeSourcesManager {
           this.emitChanged();
         }
         const filename = normalizeRelative(path.relative(source.rootPath, uri.fsPath));
-        if (!filename || filename.startsWith('../') || isSensitiveFilename(filename)) continue;
+        if (!filename || filename.startsWith('../') || isSensitiveFilename(filename)
+          || !matchesSelectedFile(filename, source)) continue;
         try {
           const realPath = await fs.realpath(uri.fsPath);
           if (!isInside(rootReal, realPath)) {
@@ -562,7 +611,8 @@ class KnowledgeSourcesManager {
       }
       if (truncated) {
         for (const [filename, document] of Object.entries(previous)) {
-          if (!Object.prototype.hasOwnProperty.call(nextDocuments, filename) && matchesSourceFilter(filename, source)) nextDocuments[filename] = document;
+          if (!Object.prototype.hasOwnProperty.call(nextDocuments, filename) && matchesSourceFilter(filename, source)
+            && matchesSelectedFile(filename, source)) nextDocuments[filename] = document;
         }
       }
       checkCancelled();
@@ -947,6 +997,8 @@ class KnowledgeSourcesManager {
       documents: Object.keys(this.documents.get(source.id) || {}).slice(0, 20),
       includeDirectories: source.includeDirectories || [],
       extensions: source.extensions || DEFAULT_SOURCE_EXTENSIONS,
+      selectedFiles: source.selectedFiles === null ? null : (source.selectedFiles || []),
+      selectedFileCount: source.selectedFiles === null ? null : (source.selectedFiles || []).length,
       progress: source.progress || null,
       indexing: this.indexing.has(source.id) || this.embeddingRefresh.has(source.id)
     };
