@@ -83,6 +83,30 @@ class KnowledgeSourcesViewProvider {
         await this.manager.removeSource(message.id);
         this.post({ type: 'notice', text: 'Fonte removida. A pasta original foi preservada.' });
         await this.postState();
+      } else if (message?.type === 'filters' && typeof message.id === 'string') {
+        const source = (await this.manager.listSources()).find(item => item.id === message.id);
+        if (!source) return;
+        const directories = await vscode.window.showInputBox({
+          title: 'Diretórios da Knowledge Source',
+          prompt: 'Informe caminhos relativos separados por vírgula. Vazio = toda a pasta. Ex.: docs, manual',
+          value: (source.includeDirectories || []).join(', '),
+          ignoreFocusOut: true
+        });
+        if (directories === undefined) return;
+        const extensions = await vscode.window.showInputBox({
+          title: 'Extensões da Knowledge Source',
+          prompt: 'Informe extensões separadas por vírgula, com ou sem ponto. Ex.: html, md, js, ts',
+          value: (source.extensions || []).join(', '),
+          ignoreFocusOut: true
+        });
+        if (extensions === undefined) return;
+        await this.manager.configureFilters(message.id, {
+          includeDirectories: directories.split(',').map(value => value.trim()).filter(Boolean),
+          extensions: extensions.split(',').map(value => value.trim()).filter(Boolean)
+        });
+        this.post({ type: 'notice', text: 'Filtros salvos. Reindexando somente os arquivos incluídos…' });
+        await this.manager.reindexSource(message.id, true);
+        await this.postState();
       } else if (message?.type === 'reindex' && typeof message.id === 'string') {
         await this.manager.reindexSource(message.id, true);
         await this.postState();
