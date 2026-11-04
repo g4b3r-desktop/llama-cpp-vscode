@@ -189,7 +189,7 @@ class KnowledgeSourcesManager {
       documents
     };
     const data = new TextEncoder().encode(JSON.stringify(payload));
-    const maxBytes = Math.max(16, Number(getConfig().rag.cache.maxMegabytes || 128)) * 1024 * 1024;
+    const maxBytes = Math.max(16, Number(getConfig().rag.knowledgeSources.maxCacheMegabytes || 1024)) * 1024 * 1024;
     if (data.byteLength > maxBytes) {
       throw new Error('Knowledge Source cache exceeds llamaCpp.rag.cache.maxMegabytes. Increase the limit or reduce the source size.');
     }
