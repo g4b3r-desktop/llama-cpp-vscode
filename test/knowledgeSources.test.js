@@ -161,7 +161,7 @@ test('RAG metrics format stage timings and structured details', () => {
   assert.equal(payload.operation, 'search');
   assert.equal(payload.timings_ms.bm25, 12.35);
   assert.equal(payload.timings_ms.rerank, 0);
-  assert.match(lines[0], /^\\[rag:metrics\\] /);
+  assert.match(lines[0], /^\[rag:metrics\] /);
   assert.match(lines[0], /\"results\":4/);
   const started = Date.now() - 25;
   assert.ok(elapsedMs(started) >= 20);
