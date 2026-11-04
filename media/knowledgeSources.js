@@ -85,7 +85,8 @@
         : 'todas as pastas';
       const extensions = Array.isArray(source.extensions) ? source.extensions.join(', ') : '';
       filters.textContent = 'Pastas: ' + directories + ' · Extensões: ' + extensions +
-        ' · Arquivos: ' + (source.selectedFileCount === null ? 'todos os compatíveis' : source.selectedFileCount + ' selecionados');
+        ' · Arquivos: ' + (source.selectedFileCount === null ? 'todos os compatíveis' : source.selectedFileCount + ' selecionados') +
+        ' · Tags: ' + ((source.tags || []).join(', ') || 'nenhuma');
 
       let progress = null;
       if (source.indexing && source.progress) {
@@ -116,12 +117,16 @@
       controls.append(enabledLabel);
       const filtersButton = makeButton('Pastas e tipos', 'filters', source.id, true);
       const filesButton = makeButton('Arquivos (' + (source.selectedFileCount === null ? 'todos' : source.selectedFileCount) + ')', 'files', source.id, true);
+      const tagsButton = makeButton('Tags', 'tags', source.id, true);
+      const rerankButton = makeButton('Rerank: ' + (source.rerankEnabled === false ? 'desativado' : 'ativo'), 'rerank', source.id, true);
       const reindex = makeButton(source.indexing ? 'Indexando…' : 'Reindexar', 'reindex', source.id, true);
       reindex.disabled = Boolean(source.indexing || source.status === 'indexing');
       filtersButton.disabled = Boolean(source.indexing || source.status === 'indexing');
       filesButton.disabled = Boolean(source.indexing || source.status === 'indexing');
+      tagsButton.disabled = Boolean(source.indexing || source.status === 'indexing');
+      rerankButton.disabled = Boolean(source.indexing || source.status === 'indexing');
       const remove = makeButton('Remover', 'remove', source.id, true);
-      controls.append(filtersButton, filesButton, reindex, remove);
+      controls.append(filtersButton, filesButton, tagsButton, rerankButton, reindex, remove);
 
       card.append(heading, root, stats, updated, filters);
       if (progress) card.appendChild(progress);
