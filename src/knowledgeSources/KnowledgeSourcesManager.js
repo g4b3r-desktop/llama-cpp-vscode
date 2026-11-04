@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { getConfig } = require('../config');
 const { parseDocument } = require('./KnowledgeDocumentParser');
 const { tokenize } = require('../workspaceIndex');
-const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile } = require('./sourceUtils');
+const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile, normalizeSourceTags, matchesRetrievalScope } = require('./sourceUtils');
 const { runEmbeddingBatches } = require('./embeddingQueue');
 
 const INDEX_VERSION = 1;
@@ -66,6 +66,8 @@ class KnowledgeSourcesManager {
             includeDirectories: normalizeSourceDirectories(item.includeDirectories || []),
             extensions: normalizeSourceExtensions(item.extensions || DEFAULT_SOURCE_EXTENSIONS),
             selectedFiles: normalizeSelectedFiles(item.selectedFiles),
+            tags: normalizeSourceTags(item.tags),
+            rerankEnabled: item.rerankEnabled !== false,
             progress: null,
             needsFilterRefresh: false,
             createdAt: item.createdAt || new Date().toISOString(),
@@ -108,6 +110,8 @@ class KnowledgeSourcesManager {
           includeDirectories: source.includeDirectories || [],
           extensions: source.extensions || DEFAULT_SOURCE_EXTENSIONS,
           selectedFiles: source.selectedFiles === null ? null : (source.selectedFiles || []),
+          tags: normalizeSourceTags(source.tags),
+          rerankEnabled: source.rerankEnabled !== false,
           createdAt: source.createdAt,
           updatedAt: source.updatedAt,
           lastIndexedAt: source.lastIndexedAt,
@@ -266,7 +270,7 @@ class KnowledgeSourcesManager {
         const mtimeMs = Number.isFinite(storedMtimeMs) ? storedMtimeMs : Number.isFinite(legacyMtime) ? legacyMtime : 0;
         const safeDocument = { hash: document.hash, size: Number(document.size || 0), mtimeMs, chunks: safeChunks };
         documents[filename] = safeDocument;
-        for (const chunk of safeChunks) chunks.push(this.toSearchChunk(source, filename, chunk, safeDocument.hash));
+        for (const chunk of safeChunks) chunks.push(this.toSearchChunk(source, filename, chunk, safeDocument.hash, safeDocument.mtimeMs));
       }
       const currentFingerprint = embeddingFingerprint();
       source.needsFilterRefresh = raw.filtersFingerprint !== sourceFiltersFingerprint(source);
@@ -348,6 +352,8 @@ class KnowledgeSourcesManager {
       includeDirectories: [],
       extensions: [...DEFAULT_SOURCE_EXTENSIONS],
       selectedFiles: null,
+      tags: [],
+      rerankEnabled: true,
       progress: null,
       needsFilterRefresh: false,
       createdAt: now,
@@ -591,19 +597,29 @@ class KnowledgeSourcesManager {
           }
           const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
           const parsed = parseDocument(filename, text, config.rag.knowledgeSources);
+          const reusableVectors = new Map();
+          for (const oldChunk of old?.chunks || []) {
+            if (!Array.isArray(oldChunk.vector) || !oldChunk.vector.length) continue;
+            const key = oldChunk.embeddingHash || this.embeddingHashForChunk(source, filename, oldChunk);
+            reusableVectors.set(key, oldChunk.vector);
+          }
           const doc = {
             hash,
             size: stat.size,
             mtimeMs: stat.mtimeMs,
-            chunks: parsed.map((chunk, index) => ({
-              id: source.id + ':' + hash.slice(0, 12) + ':' + index,
-              title: chunk.title || '',
-              section: chunk.section || '',
-              startLine: Number.isInteger(chunk.startLine) ? chunk.startLine : null,
-              endLine: Number.isInteger(chunk.endLine) ? chunk.endLine : null,
-              text: chunk.text,
-              vector: undefined
-            }))
+            chunks: parsed.map((chunk, index) => {
+              const item = {
+                id: source.id + ':' + hash.slice(0, 12) + ':' + index,
+                title: chunk.title || '',
+                section: chunk.section || '',
+                startLine: Number.isInteger(chunk.startLine) ? chunk.startLine : null,
+                endLine: Number.isInteger(chunk.endLine) ? chunk.endLine : null,
+                text: chunk.text
+              };
+              item.embeddingHash = this.embeddingHashForChunk(source, filename, item);
+              item.vector = reusableVectors.get(item.embeddingHash);
+              return item;
+            })
           };
           nextDocuments[filename] = doc;
           changed.push(filename);
@@ -658,7 +674,7 @@ class KnowledgeSourcesManager {
             concurrency,
             signal,
             processBatch: batch => this.client.embed(
-              batch.map(chunk => ('source: ' + source.name + '\nfile: ' + chunk.filename + '\nsection: ' + (chunk.section || '') + '\n' + chunk.text).slice(0, maxCharacters)),
+              this.embeddingInput(source, chunk.filename, chunk, maxCharacters),
               signal
             ),
             onBatchSuccess: (batch, vectors) => {
@@ -811,7 +827,8 @@ class KnowledgeSourcesManager {
         this.emitChanged();
       }
 
-      output.push(...(this.indexes.get(source.id) || []));
+      const sourceChunks = this.indexes.get(source.id) || [];
+      output.push(...sourceChunks.filter(chunk => matchesRetrievalScope(chunk, options)));
     }
     return output;
   }
@@ -848,7 +865,7 @@ class KnowledgeSourcesManager {
       concurrency,
       signal,
       processBatch: batch => this.client.embed(
-        batch.map(chunk => ('source: ' + source.name + '\nfile: ' + chunk.filename + '\nsection: ' + (chunk.section || '') + '\n' + chunk.text).slice(0, maxCharacters)),
+        this.embeddingInput(source, chunk.filename, chunk, maxCharacters),
         signal
       ),
       onBatchSuccess: (batch, vectors) => {
@@ -904,15 +921,44 @@ class KnowledgeSourcesManager {
     this.emitChanged();
   }
 
+  embeddingInput(source, filename, chunk, maxCharacters = getConfig().rag.embedding.maxCharacters) {
+    return ('source: ' + source.name + '\nfile: ' + filename + '\nsection: ' + (chunk.section || '') + '\n' + chunk.text).slice(0, Math.max(256, Number(maxCharacters) || 4000));
+  }
+
+  embeddingHashForChunk(source, filename, chunk) {
+    const maxCharacters = getConfig().rag.embedding.maxCharacters;
+    return sha256(embeddingFingerprint() + '|' + maxCharacters + '|' + this.embeddingInput(source, filename, chunk, maxCharacters));
+  }
+
+  async configureTags(sourceId, tags) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    source.tags = normalizeSourceTags(tags);
+    source.updatedAt = new Date().toISOString();
+    await this.persistCatalog();
+    this.emitChanged();
+    return this.summarize(source);
+  }
+
+  async setRerankEnabled(sourceId, enabled) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    source.rerankEnabled = Boolean(enabled);
+    source.updatedAt = new Date().toISOString();
+    await this.persistCatalog();
+    this.emitChanged();
+    return this.summarize(source);
+  }
+
   flattenDocuments(source, documents) {
     const chunks = [];
     for (const [filename, document] of Object.entries(documents)) {
-      for (const chunk of document.chunks || []) chunks.push(this.toSearchChunk(source, filename, chunk, document.hash));
+      for (const chunk of document.chunks || []) chunks.push(this.toSearchChunk(source, filename, chunk, document.hash, document.mtimeMs));
     }
     return chunks;
   }
 
-  toSearchChunk(source, filename, chunk, documentHash) {
+  toSearchChunk(source, filename, chunk, documentHash, documentMtimeMs = 0) {
     const uri = vscode.Uri.file(path.join(source.rootPath, filename));
     const searchablePath = source.name + ' ' + filename + ' ' + (chunk.title || '') + ' ' + (chunk.section || '');
     const content = String(chunk.text || '');
@@ -931,6 +977,10 @@ class KnowledgeSourcesManager {
       text: content,
       hash: documentHash,
       vector: Array.isArray(chunk.vector) ? chunk.vector : undefined,
+      embeddingHash: chunk.embeddingHash || this.embeddingHashForChunk(source, filename, chunk),
+      tags: normalizeSourceTags(source.tags),
+      rerankEnabled: source.rerankEnabled !== false,
+      mtimeMs: Number(documentMtimeMs || 0),
       tokens: tokenize(searchablePath + ' ' + content),
       pathTokens: new Set(tokenize(searchablePath))
     };
@@ -1002,6 +1052,8 @@ class KnowledgeSourcesManager {
       extensions: source.extensions || DEFAULT_SOURCE_EXTENSIONS,
       selectedFiles: source.selectedFiles === null ? null : (source.selectedFiles || []),
       selectedFileCount: source.selectedFiles === null ? null : (source.selectedFiles || []).length,
+      tags: normalizeSourceTags(source.tags),
+      rerankEnabled: source.rerankEnabled !== false,
       progress: source.progress || null,
       indexing: this.indexing.has(source.id) || this.embeddingRefresh.has(source.id)
     };
