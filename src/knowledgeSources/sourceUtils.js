@@ -82,7 +82,7 @@ function normalizeSourceExtensions(values) {
 function normalizeSourceDirectories(values) {
   const items = Array.isArray(values) ? values : String(values || '').split(',');
   const normalized = [...new Set(items.map(value => {
-    let directory = String(value || '').trim().replaceAll('\\\\', '/');
+    let directory = String(value || '').trim().replaceAll(String.fromCharCode(92), '/');
     if (directory.startsWith('./')) directory = directory.slice(2);
     while (directory.endsWith('/')) directory = directory.slice(0, -1);
     return directory;
