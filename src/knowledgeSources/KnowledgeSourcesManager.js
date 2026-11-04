@@ -719,10 +719,12 @@ class KnowledgeSourcesManager {
       if (source.needsFilterRefresh && !config.rag.knowledgeSources.autoIndex) continue;
 
       if (source.needsEmbedding && config.rag.knowledgeSources.autoIndex
+        && !source.error?.startsWith('Embeddings indisponíveis')
         && !indexingInBackground && !this.indexing.has(source.id) && !this.embeddingRefresh.has(source.id)) {
         const refreshController = new AbortController();
         this.embeddingRefreshControllers.set(source.id, refreshController);
-        const task = this.refreshCachedEmbeddings(source, refreshController.signal)
+        const task = Promise.resolve()
+          .then(() => this.refreshCachedEmbeddings(source, refreshController.signal))
           .catch(error => {
             source.needsEmbedding = false;
             source.progress = { ...(source.progress || {}), phase: 'paused' };
@@ -736,6 +738,7 @@ class KnowledgeSourcesManager {
             this.emitChanged();
           });
         this.embeddingRefresh.set(source.id, task);
+        this.emitChanged();
       }
 
       output.push(...(this.indexes.get(source.id) || []));
