@@ -163,8 +163,7 @@ test('RAG metrics format stage timings and structured details', () => {
   assert.equal(payload.timings_ms.rerank, 0);
   assert.match(lines[0], /^\[rag:metrics\] /);
   assert.match(lines[0], /\"results\":4/);
-  const started = Date.now() - 25;
-  assert.ok(elapsedMs(started) >= 20);
+  assert.equal(elapsedMs(100, 125), 25);
 });
 
 test('retrieval scope filters by directory, source tags and recent modification time', () => {
