@@ -1,5 +1,6 @@
 const vscode = require('vscode');
 const path = require('path');
+const { DEFAULT_SOURCE_EXTENSIONS } = require('../knowledgeSources/sourceUtils');
 
 const VIEW_ID = 'llamaCpp.knowledgeSourcesView';
 
@@ -93,16 +94,32 @@ class KnowledgeSourcesViewProvider {
           ignoreFocusOut: true
         });
         if (directories === undefined) return;
-        const extensions = await vscode.window.showInputBox({
-          title: 'Extensões da Knowledge Source',
-          prompt: 'Informe extensões separadas por vírgula, com ou sem ponto. Vazio = todas. Ex.: html, md, js, ts',
-          value: (source.extensions || []).join(', '),
+        const categoryFor = extension => {
+          if (['html', 'htm', 'md', 'mdx', 'txt'].includes(extension)) return 'Documentação';
+          if (['json', 'jsonc', 'xml', 'yaml', 'yml', 'sql', 'graphql', 'gql', 'proto'].includes(extension)) return 'Dados e configuração';
+          if (['js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'vue', 'svelte', 'css', 'scss', 'less'].includes(extension)) return 'Web';
+          if (['py', 'java', 'c', 'cc', 'cpp', 'h', 'hpp', 'cs', 'go', 'rs', 'php', 'rb', 'swift', 'kt', 'kts', 'scala'].includes(extension)) return 'Código-fonte';
+          return 'Scripts';
+        };
+        const extensionItems = DEFAULT_SOURCE_EXTENSIONS.map(extension => ({
+          label: '.' + extension,
+          description: categoryFor(extension),
+          picked: (source.extensions || DEFAULT_SOURCE_EXTENSIONS).includes(extension)
+        }));
+        const selectedExtensions = await vscode.window.showQuickPick(extensionItems, {
+          title: 'Tipos de arquivos da Knowledge Source · ' + source.name,
+          placeHolder: 'Marque as extensões que devem ser indexadas e consultadas pelo RAG',
+          canPickMany: true,
           ignoreFocusOut: true
         });
-        if (extensions === undefined) return;
+        if (!selectedExtensions) return;
+        if (!selectedExtensions.length) {
+          await vscode.window.showWarningMessage('Selecione pelo menos uma extensão para a Knowledge Source.');
+          return;
+        }
         await this.manager.configureFilters(message.id, {
           includeDirectories: directories.split(',').map(value => value.trim()).filter(Boolean),
-          extensions: extensions.split(',').map(value => value.trim()).filter(Boolean)
+          extensions: selectedExtensions.map(item => item.label.replace(/^\\./, ''))
         });
         this.post({ type: 'notice', text: 'Filtros salvos. Reindexando somente os arquivos incluídos…' });
         await this.manager.reindexSource(message.id, true);
