@@ -24,6 +24,7 @@ class KnowledgeSourcesManager {
     this.watchTimers = new Map();
     this.pendingRefresh = new Set();
     this.indexing = new Map();
+    this.embeddingRefresh = new Map();
     this.controllers = new Map();
     this.catalogWrite = Promise.resolve();
     this.emitter = new vscode.EventEmitter();
@@ -565,20 +566,43 @@ class KnowledgeSourcesManager {
     const selectedIds = Array.isArray(options.sourceIds) && options.sourceIds.length ? new Set(options.sourceIds.map(String)) : null;
     for (const source of this.sources.values()) {
       if (!source.enabled || (selectedIds && !selectedIds.has(source.id))) continue;
-      if ((source.status !== 'indexed' || source.needsRechunk || source.needsFilterRefresh) && config.rag.knowledgeSources.autoIndex) {
-        try { await this.reindexSource(source.id, false); } catch (error) {
-          this.output?.appendLine('[knowledge-sources] automatic indexing skipped for ' + source.name + ': ' + error.message);
+
+      const cachedChunks = this.indexes.get(source.id) || [];
+      const hasCachedIndex = cachedChunks.length > 0;
+      const isStale = source.status !== 'indexed' || source.needsRechunk || source.needsFilterRefresh;
+      if (isStale && config.rag.knowledgeSources.autoIndex) {
+        if (!hasCachedIndex || source.needsFilterRefresh) {
+          // No usable cache (or filters changed): do not answer from an index that violates the configured scope.
+          try {
+            await this.reindexSource(source.id, false);
+          } catch (error) {
+            this.output?.appendLine('[knowledge-sources] automatic indexing skipped for ' + source.name + ': ' + error.message);
+          }
+        } else if (!this.indexing.has(source.id)) {
+          // Use the persisted index immediately; validate/update it in the background instead of blocking Chat.
+          void this.reindexSource(source.id, false).catch(error => {
+            this.output?.appendLine('[knowledge-sources] background index refresh failed for ' + source.name + ': ' + error.message);
+          });
         }
       }
       if (source.needsFilterRefresh && !config.rag.knowledgeSources.autoIndex) continue;
-      if (source.needsEmbedding && config.rag.knowledgeSources.autoIndex) {
-        try { await this.refreshCachedEmbeddings(source, options.signal); } catch (error) {
-          source.needsEmbedding = false;
-          source.error = 'Embeddings indisponíveis; busca BM25 permanece disponível: ' + (error instanceof Error ? error.message : String(error));
-          this.output?.appendLine('[knowledge-sources] embedding refresh failed for ' + source.name + ': ' + error.message);
-          this.emitChanged();
-        }
+
+      if (source.needsEmbedding && config.rag.knowledgeSources.autoIndex && !this.embeddingRefresh.has(source.id)) {
+        const task = this.refreshCachedEmbeddings(source, undefined)
+          .catch(error => {
+            source.needsEmbedding = false;
+            source.progress = { ...(source.progress || {}), phase: 'paused' };
+            source.error = 'Embeddings indisponíveis; busca BM25 permanece disponível: ' + (error instanceof Error ? error.message : String(error));
+            this.output?.appendLine('[knowledge-sources] background embedding refresh failed for ' + source.name + ': ' + error.message);
+            this.emitChanged();
+          })
+          .finally(() => {
+            this.embeddingRefresh.delete(source.id);
+            this.emitChanged();
+          });
+        this.embeddingRefresh.set(source.id, task);
       }
+
       output.push(...(this.indexes.get(source.id) || []));
     }
     return output;
@@ -764,7 +788,7 @@ class KnowledgeSourcesManager {
       includeDirectories: source.includeDirectories || [],
       extensions: source.extensions || DEFAULT_SOURCE_EXTENSIONS,
       progress: source.progress || null,
-      indexing: this.indexing.has(source.id)
+      indexing: this.indexing.has(source.id) || this.embeddingRefresh.has(source.id)
     };
   }
 
