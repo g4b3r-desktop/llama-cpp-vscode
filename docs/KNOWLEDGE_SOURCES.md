@@ -32,9 +32,11 @@ PDF e DOCX ainda não têm extratores implementados. Eles não são indexados ne
 
 Os catálogos e índices ficam em ExtensionContext.globalStorageUri/knowledge-sources, permitindo reutilização entre workspaces. O cache de cada fonte é independente do cache do Workspace RAG.
 
-Cada documento recebe SHA-256. Em uma reindexação, documentos sem mudança reutilizam chunks e embeddings existentes. Documentos novos ou alterados são reprocessados; documentos removidos deixam de fazer parte do índice. Falhas de leitura preservam a versão indexada anteriormente e são reportadas na view.
+Cada documento recebe SHA-256. Em uma reindexação, todos os arquivos incluídos são verificados por hash, mas documentos sem mudança reutilizam chunks e embeddings existentes. Somente documentos novos ou alterados são reprocessados e recebem novos embeddings; documentos removidos ou excluídos pelos filtros deixam de fazer parte do índice. Falhas de leitura preservam a versão indexada anteriormente e são reportadas na view.
 
-A alteração da configuração de chunking invalida o parser fingerprint e provoca reconstrução dos chunks. A alteração do fingerprint de embeddings invalida apenas os vetores; o texto e os chunks permanecem disponíveis para reconstruir os embeddings.
+Os embeddings são processados em lotes com concorrência limitada. Cada lote concluído é acrescentado a um diário de checkpoints JSONL, sem reescrever o índice completo a cada lote. No próximo início, os vetores válidos são reaplicados aos chunks e o processamento continua apenas nos chunks sem vetor. Quando todos os vetores são consolidados no índice principal, o diário é removido. Isso também limita a perda de progresso em caso de cancelamento ou encerramento inesperado ao último lote ainda não persistido.
+
+A alteração da configuração de chunking invalida o parser fingerprint e provoca reconstrução dos chunks. A alteração do fingerprint de embeddings invalida apenas os vetores; o texto e os chunks permanecem disponíveis para reconstruir os embeddings. Alterações nos filtros invalidam o fingerprint de filtros e reindexam o escopo selecionado.
 
 ## Configurações
 
@@ -43,8 +45,16 @@ A alteração da configuração de chunking invalida o parser fingerprint e prov
 - llamaCpp.rag.knowledgeSources.watch: monitora mudanças nas pastas.
 - llamaCpp.rag.knowledgeSources.maxFiles: limite de arquivos por fonte.
 - llamaCpp.rag.knowledgeSources.maxFileBytes: tamanho máximo por arquivo.
+- llamaCpp.rag.knowledgeSources.maxCacheMegabytes: limite de tamanho do índice persistido das fontes externas.
 - llamaCpp.rag.knowledgeSources.chunkLines e chunkOverlapLines: chunking por linhas.
 - llamaCpp.rag.knowledgeSources.chunkCharacters e chunkOverlapCharacters: chunking por caracteres/parágrafos.
+- llamaCpp.rag.embedding.batchSize: quantidade de textos por requisição; o padrão conservador é 4.
+- llamaCpp.rag.embedding.concurrency: lotes simultâneos; o padrão é 1 para limitar pressão na VRAM.
+- llamaCpp.rag.embedding.maxCharacters: limite de caracteres por texto enviado ao modelo de embeddings.
+
+Cada fonte possui o botão **Filtros**. Informe diretórios relativos separados por vírgula (por exemplo, `docs, manual`); vazio inclui todas as pastas. Informe também as extensões aceitas (por exemplo, `html, htm, md, mdx`). As extensões precisam estar entre os formatos textuais suportados pela extensão. Os filtros são salvos por fonte e aplicados na indexação e no watcher.
+
+A interface mostra a fase atual, arquivos lidos, embeddings concluídos, lotes e concorrência. A concorrência é limitada a 4 pelo código e deve ser aumentada gradualmente; em GPUs com pouca VRAM, mantenha 1.
 
 A estratégia BM25/vector/hybrid, embeddings, reranking e Context Budget Manager continuam sendo os controles compartilhados de llamaCpp.rag.
 
