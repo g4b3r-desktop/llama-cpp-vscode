@@ -661,6 +661,7 @@ class KnowledgeSourcesManager {
       if (source.errors.length && !source.error) source.error = source.errors.length + ' file(s) could not be indexed.';
       source.updatedAt = source.lastIndexedAt;
       await this.saveIndex(source);
+      if (!source.needsEmbedding) await this.clearEmbeddingCheckpoint(source.id);
       await this.persistCatalog();
       this.output?.appendLine('[knowledge-sources] Indexed ' + source.name + ': ' + source.files + ' files / ' + source.chunks + ' chunks / ' + source.vectors + ' vectors; updated ' + changed.length + ' file(s).');
       progress?.report({ message: 'Concluído: ' + source.files + ' arquivos, ' + source.chunks + ' chunks, ' + source.vectors + ' embeddings.' });
@@ -741,6 +742,8 @@ class KnowledgeSourcesManager {
     const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 4));
     const concurrency = Math.max(1, Math.min(4, Number(config.rag.embedding.concurrency || 1)));
     const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
+    const checkpointQueue = [];
+    await this.ensureEmbeddingCheckpoint(source);
     source.progress = {
       phase: 'embedding',
       current: chunks.filter(chunk => chunk.vector?.length).length,
@@ -772,14 +775,19 @@ class KnowledgeSourcesManager {
             throw new Error('Embedding dimension changed from ' + source.embeddingDimension + ' to ' + vector.length + '.');
           }
           const target = documents[batch[index].filename]?.chunks?.find(item => item.id === batch[index].id);
-          if (target) target.vector = vector;
+          if (target) {
+            target.vector = vector;
+            checkpointQueue.push({ id: target.id, vector });
+          }
           if (!source.embeddingDimension) source.embeddingDimension = vector.length;
         }
       },
       onWaveComplete: async batchProgress => {
+        await this.appendEmbeddingCheckpoint(source, checkpointQueue.splice(0));
         chunks = this.flattenDocuments(source, documents);
         this.indexes.set(source.id, chunks);
         source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
+        source.needsEmbedding = chunks.some(chunk => !chunk.vector?.length);
         source.progress = {
           phase: 'embedding',
           current: source.vectors,
@@ -790,10 +798,7 @@ class KnowledgeSourcesManager {
           batchesTotal: batchProgress.totalBatches,
           concurrency: batchProgress.concurrency
         };
-        source.needsEmbedding = chunks.some(chunk => !chunk.vector?.length);
-        await this.saveIndex(source);
-        await this.persistCatalog();
-        this.emitChanged();
+        if (batchProgress.completedBatches % 4 === 0 || batchProgress.completedBatches === batchProgress.totalBatches) this.emitChanged();
       }
     });
 
@@ -807,6 +812,7 @@ class KnowledgeSourcesManager {
     source.progress = { phase: 'complete', current: source.vectors, total: chunks.length, completedItems: pending.length, totalItems: pending.length, batchesCompleted: source.progress?.batchesTotal || 0, batchesTotal: source.progress?.batchesTotal || 0, concurrency };
     source.error = null;
     await this.saveIndex(source);
+    if (!source.needsEmbedding) await this.clearEmbeddingCheckpoint(source.id);
     await this.persistCatalog();
     this.emitChanged();
   }
