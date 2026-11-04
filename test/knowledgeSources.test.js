@@ -117,7 +117,7 @@ test('retrieval diversification limits domination by a single source', () => {
 
 test('per-source filters normalize supported extensions and constrain directories', () => {
   assert.deepEqual(normalizeSourceExtensions(['.MD', 'html', 'md']), ['md', 'html']);
-  assert.deepEqual(normalizeSourceDirectories(['./docs/', 'manual/api\\\\']), ['docs', 'manual/api']);
+  assert.deepEqual(normalizeSourceDirectories(['./docs/', 'manual/api' + String.fromCharCode(92)]), ['docs', 'manual/api']);
   assert.equal(
     buildSourceIncludeGlob({ includeDirectories: ['docs', 'manual'], extensions: ['md', '.html'] }),
     '{docs,manual}/**/*.{md,html}'
