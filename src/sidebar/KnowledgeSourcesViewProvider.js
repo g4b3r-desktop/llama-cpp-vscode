@@ -112,11 +112,15 @@ class KnowledgeSourcesViewProvider {
         if (!source) return;
         const available = await this.manager.listAvailableFiles(message.id);
         const selected = source.selectedFiles === null ? null : new Set(source.selectedFiles || []);
-        const items = available.files.map(filename => ({
+        const items = [{
+          label: '$(check-all) Todos os arquivos compatíveis',
+          description: 'Ignora a seleção individual e usa todos os arquivos aceitos pelos filtros',
+          alwaysShow: true
+        }, ...available.files.map(filename => ({
           label: filename,
           description: selected === null || selected.has(filename) ? 'Incluído no RAG' : 'Excluído do RAG',
           picked: selected === null || selected.has(filename)
-        }));
+        }))];
         const choice = await vscode.window.showQuickPick(items, {
           title: 'Arquivos usados pelo RAG · ' + source.name,
           placeHolder: 'Selecione os arquivos que a IA poderá consultar',
@@ -124,9 +128,10 @@ class KnowledgeSourcesViewProvider {
           ignoreFocusOut: true
         });
         if (!choice) return;
-        const selectedFiles = choice.map(item => item.label);
+        const useAll = choice.some(item => item.label === '$(check-all) Todos os arquivos compatíveis');
+        const selectedFiles = useAll ? null : choice.map(item => item.label);
         await this.manager.configureSelectedFiles(message.id, selectedFiles);
-        this.post({ type: 'notice', text: selectedFiles.length + ' arquivo(s) selecionado(s). Reindexando a fonte…' });
+        this.post({ type: 'notice', text: useAll ? 'Todos os arquivos compatíveis foram selecionados. Reindexando a fonte…' : selectedFiles.length + ' arquivo(s) selecionado(s). Reindexando a fonte…' });
         await this.manager.reindexSource(message.id, true);
         await this.postState();
       } else if (message?.type === 'reindex' && typeof message.id === 'string') {
