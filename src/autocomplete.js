@@ -54,6 +54,7 @@ class LlamaInlineCompletionProvider {
           results = await this.workspaceIndex.search(retrievalQuery, {
             topK: tuning.relatedFilesTopK,
             excludeUri: document.uri,
+            includeKnowledgeSources: false,
             signal: controller.signal
           });
         }

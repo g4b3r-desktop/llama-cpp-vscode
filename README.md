@@ -687,6 +687,44 @@ O Context Budget Manager atua depois da recuperação: se o RAG trouxer mais tex
 
 ---
 
+# Knowledge Sources
+
+A extensão pode consultar pastas locais de documentação como fontes permanentes do RAG, sem fine-tuning ou alteração dos pesos do modelo.
+
+Abra **Knowledge Sources** na Activity Bar ou execute:
+
+```text
+Llama.cpp: Open Knowledge Sources
+```
+
+Adicione uma pasta local, informe um nome e aguarde a indexação. Cada fonte tem índice independente, pode ser ativada/desativada, reindexada e removida sem alterar a pasta original ou o índice do workspace.
+
+Formatos textuais indexados: HTML, Markdown/MDX, TXT, JSON/JSONC, JavaScript, TypeScript, Python e outras linguagens/formatos de código, CSS, XML e YAML. PDF e DOCX ainda não possuem extratores nesta implementação e são ignorados.
+
+A recuperação automática combina o índice do workspace com as fontes habilitadas usando a estratégia RAG configurada (BM25, vetorial ou híbrida), com reranking opcional e diversidade entre fontes. Ask, Fresh e `@llama` usam o contexto recuperado. Agent e Research também podem chamar `search_knowledge_base`.
+
+Os índices das fontes ficam em `globalStorageUri/knowledge-sources`, compartilhados entre workspaces. Os índices do workspace continuam separados. Arquivos inalterados preservam seus chunks e embeddings; hashes detectam modificações. Alterações em fontes monitoradas disparam reindexação incremental.
+
+Configurações principais:
+
+```json
+{
+  "llamaCpp.rag.knowledgeSources.enabled": true,
+  "llamaCpp.rag.knowledgeSources.autoIndex": true,
+  "llamaCpp.rag.knowledgeSources.watch": true,
+  "llamaCpp.rag.knowledgeSources.maxFiles": 2000,
+  "llamaCpp.rag.knowledgeSources.maxFileBytes": 1048576,
+  "llamaCpp.rag.knowledgeSources.chunkLines": 80,
+  "llamaCpp.rag.knowledgeSources.chunkOverlapLines": 20,
+  "llamaCpp.rag.knowledgeSources.chunkCharacters": 5000,
+  "llamaCpp.rag.knowledgeSources.chunkOverlapCharacters": 500
+}
+```
+
+O conteúdo recuperado é tratado como dado não confiável: instruções encontradas dentro de documentações nunca devem substituir as instruções do sistema ou conceder permissões ao Agent. Consulte [docs/KNOWLEDGE_SOURCES.md](docs/KNOWLEDGE_SOURCES.md) para os detalhes técnicos.
+
+A indexação exige workspace confiável do VS Code e ignora caminhos de sistema, binários e nomes de arquivos comumente associados a credenciais. Links simbólicos que escapem da pasta selecionada são rejeitados.
+
 # Métricas
 
 Quando o backend fornece dados suficientes, o indicador pode mostrar:

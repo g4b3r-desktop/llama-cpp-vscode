@@ -12,19 +12,23 @@
   "activationEvents": ["onStartupFinished", "onView:llamaCpp.assistantView"],
   "main": "./src/extension.js",
   "scripts": {
-    "check": "node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/context/ContextBudgetManager.js && node --check src/openai/OpenAIClient.js && node --check src/openai/responseUtils.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/chat/classicChatUtils.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check src/inlineSuggestionsController.js && node --check src/agent/AgentController.js && node --check src/agent/AgentRunner.js && node --check src/agent/AgentPlan.js && node --check src/sidebar/AssistantViewProvider.js && node --check src/sidebar/requestMode.js && node --check src/tools/ToolRegistry.js && node --check src/tools/registerCoreTools.js && node --check src/workspace/pathSafety.js && node --check src/workspace/diff.js && node --check src/workspace/WorkspaceService.js && node --check src/terminal/TerminalService.js && node --check src/terminal/commandPolicy.js && node --check src/permissions/PermissionService.js && node --check src/history/AgentHistory.js && node --check src/llm/AgentModel.js && node --check src/llm/LlamaAgentModel.js && node --check src/llm/OpenAIAgentModel.js && node --check src/web/urlSafety.js && node --check src/web/WebResearchService.js && node --check media/chat.js && node --check media/sidebar.js",
+    "check": "node --check src/knowledgeSources/KnowledgeDocumentParser.js && node --check src/knowledgeSources/KnowledgeSourcesManager.js && node --check src/knowledgeSources/sourceUtils.js && node --check src/knowledgeSources/retrievalUtils.js && node --check src/sidebar/KnowledgeSourcesViewProvider.js && node --check src/extension.js && node --check src/config.js && node --check src/http.js && node --check src/localServer.js && node --check src/llamaClient.js && node --check src/context/ContextBudgetManager.js && node --check src/openai/OpenAIClient.js && node --check src/openai/responseUtils.js && node --check src/autocomplete.js && node --check src/chatPanel.js && node --check src/chat/classicChatUtils.js && node --check src/workspaceIndex.js && node --check src/performance.js && node --check src/nativeModelProvider.js && node --check src/nativeChat.js && node --check src/editorActions.js && node --check src/inlineSuggestionsController.js && node --check src/agent/AgentController.js && node --check src/agent/AgentRunner.js && node --check src/agent/AgentPlan.js && node --check src/sidebar/AssistantViewProvider.js && node --check src/sidebar/requestMode.js && node --check src/tools/ToolRegistry.js && node --check src/tools/registerCoreTools.js && node --check src/workspace/pathSafety.js && node --check src/workspace/diff.js && node --check src/workspace/WorkspaceService.js && node --check src/terminal/TerminalService.js && node --check src/terminal/commandPolicy.js && node --check src/permissions/PermissionService.js && node --check src/history/AgentHistory.js && node --check src/llm/AgentModel.js && node --check src/llm/LlamaAgentModel.js && node --check src/llm/OpenAIAgentModel.js && node --check src/web/urlSafety.js && node --check src/web/WebResearchService.js && node --check media/chat.js && node --check media/sidebar.js && node --check media/knowledgeSources.js",
     "test": "node --test test/*.test.js",
     "package": "npx @vscode/vsce package"
   },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
-        {"id": "llamaCppAssistant", "title": "llama.cpp", "icon": "media/llama.svg"}
+        {"id": "llamaCppAssistant", "title": "llama.cpp", "icon": "media/llama.svg"},
+        {"id": "llamaCppKnowledgeSources", "title": "Knowledge Sources", "icon": "media/knowledge.svg"}
       ]
     },
     "views": {
       "llamaCppAssistant": [
         {"type": "webview", "id": "llamaCpp.assistantView", "name": "Assistant", "contextualTitle": "llama.cpp Assistant"}
+      ],
+      "llamaCppKnowledgeSources": [
+        {"type": "webview", "id": "llamaCpp.knowledgeSourcesView", "name": "Knowledge Sources", "contextualTitle": "Knowledge Sources"}
       ]
     },
     "languageModelChatProviders": [{"vendor": "g4b3r-llamacpp", "displayName": "llama.cpp / OpenAI", "managementCommand": "llamaCpp.manageProvider"}],
@@ -71,6 +75,8 @@
       {"command": "llamaCpp.triggerCompletion", "title": "Llama.cpp: Trigger Inline Completion"},
       {"command": "llamaCpp.reindexWorkspace", "title": "Llama.cpp: Reindex Workspace (RAG)"},
       {"command": "llamaCpp.showIndexStatus", "title": "Llama.cpp: Show RAG Index Status"},
+      {"command": "llamaCpp.openKnowledgeSources", "title": "Llama.cpp: Open Knowledge Sources"},
+      {"command": "llamaCpp.reindexKnowledgeSources", "title": "Llama.cpp: Reindex All Knowledge Sources"},
       {"command": "llamaCpp.setRagApiKey", "title": "Llama.cpp: Set RAG API Key"},
       {"command": "llamaCpp.clearRagApiKey", "title": "Llama.cpp: Clear RAG API Key"},
       {"command": "llamaCpp.showPerformanceMetrics", "title": "Llama.cpp: Show Performance Metrics"}
@@ -193,6 +199,15 @@
         "llamaCpp.rag.rerank.candidates": {"type": "number", "default": 20},
         "llamaCpp.rag.cache.enabled": {"type": "boolean", "default": true},
         "llamaCpp.rag.cache.maxMegabytes": {"type": "number", "default": 128},
+        "llamaCpp.rag.knowledgeSources.enabled": {"type": "boolean", "default": true, "description": "Include enabled external documentation folders in automatic RAG retrieval."},
+        "llamaCpp.rag.knowledgeSources.autoIndex": {"type": "boolean", "default": true, "description": "Automatically index new or changed Knowledge Sources when they are queried."},
+        "llamaCpp.rag.knowledgeSources.watch": {"type": "boolean", "default": true, "description": "Watch external documentation folders and schedule incremental updates."},
+        "llamaCpp.rag.knowledgeSources.maxFiles": {"type": "number", "default": 2000, "minimum": 1, "maximum": 50000},
+        "llamaCpp.rag.knowledgeSources.maxFileBytes": {"type": "number", "default": 1048576, "minimum": 1024},
+        "llamaCpp.rag.knowledgeSources.chunkLines": {"type": "number", "default": 80, "minimum": 10, "maximum": 1000},
+        "llamaCpp.rag.knowledgeSources.chunkOverlapLines": {"type": "number", "default": 20, "minimum": 0, "maximum": 200},
+        "llamaCpp.rag.knowledgeSources.chunkCharacters": {"type": "number", "default": 5000, "minimum": 500, "maximum": 30000},
+        "llamaCpp.rag.knowledgeSources.chunkOverlapCharacters": {"type": "number", "default": 500, "minimum": 0, "maximum": 10000},
         "llamaCpp.metrics.showStatusBar": {"type": "boolean", "default": true},
         "llamaCpp.request.timeoutMs": {"type": "number", "default": 120000}
       }

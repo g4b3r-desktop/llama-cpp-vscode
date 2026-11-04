@@ -1,0 +1,670 @@
+const vscode = require('vscode');
+const fs = require('fs/promises');
+const path = require('path');
+const crypto = require('crypto');
+const { getConfig } = require('../config');
+const { parseDocument } = require('./KnowledgeDocumentParser');
+const { tokenize } = require('../workspaceIndex');
+const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, looksBinary, sha256 } = require('./sourceUtils');
+
+const INDEX_VERSION = 1;
+const INCLUDE_GLOB = '**/*.{html,htm,md,mdx,txt,json,jsonc,js,jsx,mjs,cjs,ts,tsx,py,java,c,cc,cpp,h,hpp,cs,go,rs,php,rb,swift,kt,kts,scala,sh,bash,zsh,lua,vue,svelte,css,scss,less,xml,yaml,yml,sql,graphql,gql,proto}';
+const EXCLUDE_GLOB = '**/{.git,node_modules,dist,build,out,target,vendor,.venv,venv,.next,.nuxt,coverage,.cache}/**';
+
+class KnowledgeSourcesManager {
+  constructor(client, output, storageUri) {
+    this.client = client;
+    this.output = output;
+    this.storageUri = storageUri;
+    this.sources = new Map();
+    this.indexes = new Map();
+    this.documents = new Map();
+    this.watchers = new Map();
+    this.watchTimers = new Map();
+    this.pendingRefresh = new Set();
+    this.indexing = new Map();
+    this.controllers = new Map();
+    this.catalogWrite = Promise.resolve();
+    this.emitter = new vscode.EventEmitter();
+    this.onDidChange = this.emitter.event;
+    this.ready = this.load();
+  }
+
+  async load() {
+    if (!this.storageUri) return [];
+    const root = vscode.Uri.joinPath(this.storageUri, 'knowledge-sources');
+    await vscode.workspace.fs.createDirectory(root);
+    const catalog = vscode.Uri.joinPath(root, 'sources.json');
+    try {
+      const raw = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(catalog)));
+      if (raw?.version !== INDEX_VERSION || !Array.isArray(raw.sources)) throw new Error('Invalid Knowledge Sources catalog version.');
+      for (const item of raw.sources) {
+        try {
+          if (!isValidSourceId(item?.id) || typeof item.rootUri !== 'string') continue;
+          const storedUri = vscode.Uri.parse(item.rootUri);
+          if (storedUri.scheme !== 'file') continue;
+          let rootPath = storedUri.fsPath;
+          let rootError = null;
+          try {
+            rootPath = await fs.realpath(rootPath);
+            const stat = await fs.stat(rootPath);
+            if (!stat.isDirectory() || isBlockedRoot(rootPath)) throw new Error('The stored source folder is not an allowed documentation directory.');
+          } catch (error) {
+            rootError = 'Source folder unavailable or not allowed: ' + (error instanceof Error ? error.message : String(error));
+          }
+          const source = {
+            id: item.id,
+            name: String(item.name || 'Knowledge Source').trim().slice(0, 120) || 'Knowledge Source',
+            type: 'local-folder',
+            rootUri: vscode.Uri.file(rootPath).toString(),
+            rootPath,
+            enabled: !rootError && item.enabled !== false,
+            createdAt: item.createdAt || new Date().toISOString(),
+            updatedAt: item.updatedAt || new Date().toISOString(),
+            lastIndexedAt: item.lastIndexedAt || null,
+            status: rootError ? 'error' : 'pending',
+            files: Number(item.files || 0),
+            chunks: Number(item.chunks || 0),
+            vectors: Number(item.vectors || 0),
+            error: rootError,
+            errors: []
+          };
+          this.sources.set(source.id, source);
+          if (!rootError && source.enabled) await this.loadIndex(source);
+        } catch (error) {
+          this.output?.appendLine('[knowledge-sources] skipped invalid catalog entry: ' + (error instanceof Error ? error.message : String(error)));
+        }
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') this.output?.appendLine('[knowledge-sources] catalog load failed: ' + error.message);
+    }
+    for (const source of this.sources.values()) this.setupWatcher(source);
+    return this.listSourcesSync();
+  }
+
+  async persistCatalog() {
+    const write = async () => {
+      if (!this.storageUri) return;
+      const root = vscode.Uri.joinPath(this.storageUri, 'knowledge-sources');
+      await vscode.workspace.fs.createDirectory(root);
+      const catalog = {
+        version: INDEX_VERSION,
+        updatedAt: new Date().toISOString(),
+        sources: [...this.sources.values()].map(source => ({
+          id: source.id,
+          name: source.name,
+          type: source.type,
+          rootUri: source.rootUri,
+          enabled: source.enabled,
+          createdAt: source.createdAt,
+          updatedAt: source.updatedAt,
+          lastIndexedAt: source.lastIndexedAt,
+          files: source.files,
+          chunks: source.chunks,
+          vectors: source.vectors
+        }))
+      };
+      const target = vscode.Uri.joinPath(root, 'sources.json');
+      const temporary = vscode.Uri.joinPath(root, 'sources.tmp.json');
+      await vscode.workspace.fs.writeFile(temporary, new TextEncoder().encode(JSON.stringify(catalog, null, 2)));
+      await vscode.workspace.fs.rename(temporary, target, { overwrite: true });
+    };
+    this.catalogWrite = this.catalogWrite.catch(() => {}).then(write);
+    return this.catalogWrite;
+  }
+
+  cacheUri(sourceId) {
+    if (!this.storageUri) return undefined;
+    return vscode.Uri.joinPath(this.storageUri, 'knowledge-sources', sourceId + '.index.json');
+  }
+
+  async loadIndex(source) {
+    const uri = this.cacheUri(source.id);
+    if (!uri) return false;
+    try {
+      const raw = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)));
+      if (raw?.version !== INDEX_VERSION || raw.sourceId !== source.id || raw.rootUri !== source.rootUri || !raw.documents || typeof raw.documents !== 'object') return false;
+      const documents = raw.documents;
+      let chunks = [];
+      for (const [filename, document] of Object.entries(documents)) {
+        if (!document || typeof document.hash !== 'string' || !Array.isArray(document.chunks)) continue;
+        for (const chunk of document.chunks) chunks.push(this.toSearchChunk(source, filename, chunk, document.hash));
+      }
+      const currentFingerprint = embeddingFingerprint();
+      const vectors = chunks.filter(chunk => chunk.vector?.length);
+      const dimensions = new Set(vectors.map(chunk => chunk.vector.length));
+      const refreshVectors = raw.embeddingFingerprint !== currentFingerprint || dimensions.size > 1;
+      source.embeddingDimension = refreshVectors ? undefined : (dimensions.size === 1 ? [...dimensions][0] : Number(raw.embeddingDimension || 0) || undefined);
+      source.needsRechunk = raw.parserFingerprint !== parserFingerprint();
+      if (refreshVectors) {
+        for (const chunk of chunks) delete chunk.vector;
+        for (const document of Object.values(documents)) for (const chunk of document.chunks || []) delete chunk.vector;
+      }
+      this.documents.set(source.id, documents);
+      this.indexes.set(source.id, chunks);
+      source.files = Object.keys(documents).length;
+      source.chunks = chunks.length;
+      source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
+      source.lastIndexedAt = raw.indexedAt || source.lastIndexedAt;
+      source.status = 'stale';
+      source.error = null;
+      source.needsEmbedding = chunks.some(chunk => !chunk.vector?.length) && getConfig().rag.embedding.enabled && getConfig().rag.strategy !== 'bm25';
+      return true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') this.output?.appendLine('[knowledge-sources] cache load failed for ' + source.name + ': ' + error.message);
+      return false;
+    }
+  }
+
+  async saveIndex(source) {
+    const uri = this.cacheUri(source.id);
+    if (!uri) return;
+    const documents = this.documents.get(source.id) || {};
+    const payload = {
+      version: INDEX_VERSION,
+      sourceId: source.id,
+      rootUri: source.rootUri,
+      indexedAt: source.lastIndexedAt,
+      embeddingFingerprint: embeddingFingerprint(),
+      parserFingerprint: parserFingerprint(),
+      embeddingDimension: source.embeddingDimension || null,
+      documents
+    };
+    const data = new TextEncoder().encode(JSON.stringify(payload));
+    const maxBytes = Math.max(16, Number(getConfig().rag.cache.maxMegabytes || 128)) * 1024 * 1024;
+    if (data.byteLength > maxBytes) {
+      throw new Error('Knowledge Source cache exceeds llamaCpp.rag.cache.maxMegabytes. Increase the limit or reduce the source size.');
+    }
+    const temporary = vscode.Uri.joinPath(this.storageUri, 'knowledge-sources', source.id + '.index.tmp');
+    await vscode.workspace.fs.writeFile(temporary, data);
+    await vscode.workspace.fs.rename(temporary, uri, { overwrite: true });
+  }
+
+  async addSource(folderUri, name) {
+    await this.ready;
+    if (!folderUri || folderUri.scheme !== 'file') throw new Error('Knowledge Sources currently require a local file folder.');
+    const rootPath = await fs.realpath(folderUri.fsPath);
+    const stat = await fs.stat(rootPath);
+    if (!stat.isDirectory()) throw new Error('The selected Knowledge Source is not a directory.');
+    if (isBlockedRoot(rootPath)) throw new Error('Select a documentation folder, not a system root directory.');
+    for (const item of this.sources.values()) {
+      if (path.resolve(item.rootPath) === path.resolve(rootPath)) throw new Error('This folder is already registered as a Knowledge Source.');
+    }
+    const id = crypto.randomBytes(12).toString('hex');
+    const now = new Date().toISOString();
+    const source = {
+      id,
+      name: String(name || '').trim().slice(0, 120) || path.basename(rootPath) || 'Knowledge Source',
+      type: 'local-folder',
+      rootUri: vscode.Uri.file(rootPath).toString(),
+      rootPath,
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+      lastIndexedAt: null,
+      status: 'pending',
+      files: 0,
+      chunks: 0,
+      vectors: 0,
+      error: null,
+      errors: []
+    };
+    this.sources.set(id, source);
+    this.indexes.set(id, []);
+    this.documents.set(id, {});
+    this.setupWatcher(source);
+    await this.persistCatalog();
+    this.emitChanged();
+    return this.summarize(source);
+  }
+
+  async setEnabled(sourceId, enabled) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    const nextEnabled = Boolean(enabled);
+    if (nextEnabled) {
+      const rootPath = await fs.realpath(source.rootPath);
+      const stat = await fs.stat(rootPath);
+      if (!stat.isDirectory() || isBlockedRoot(rootPath)) throw new Error('The source folder is not an allowed documentation directory.');
+      source.rootPath = rootPath;
+      source.rootUri = vscode.Uri.file(rootPath).toString();
+      if (!this.indexes.has(source.id)) {
+        const loaded = await this.loadIndex(source);
+        if (!loaded) source.status = 'pending';
+      }
+      if (source.status === 'error') source.status = 'stale';
+      source.enabled = true;
+      this.setupWatcher(source);
+    } else {
+      source.enabled = false;
+      this.disposeWatcher(source.id);
+    }
+    source.updatedAt = new Date().toISOString();
+    await this.persistCatalog();
+    this.emitChanged();
+    return this.summarize(source);
+  }
+
+  async removeSource(sourceId) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    this.controllers.get(sourceId)?.abort();
+    this.disposeWatcher(sourceId);
+    const active = this.indexing.get(sourceId);
+    if (active) await active.catch(() => {});
+    this.sources.delete(sourceId);
+    this.indexes.delete(sourceId);
+    this.documents.delete(sourceId);
+    const cache = this.cacheUri(sourceId);
+    if (cache) await vscode.workspace.fs.delete(cache, { useTrash: false }).catch(() => {});
+    await this.persistCatalog();
+    this.emitChanged();
+    return { removed: sourceId };
+  }
+
+  async reindexSource(sourceId, showProgress = false, externalToken) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    if (this.indexing.has(sourceId)) return this.indexing.get(sourceId);
+    const run = async (progress, token) => this.performReindex(source, progress, externalToken || token);
+    const promise = showProgress
+      ? vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Knowledge Sources: ' + source.name, cancellable: true }, run)
+      : run(undefined, undefined);
+    this.indexing.set(sourceId, promise);
+    try {
+      return await promise;
+    } finally {
+      this.indexing.delete(sourceId);
+      this.controllers.delete(sourceId);
+      this.emitChanged();
+      if (this.pendingRefresh.delete(sourceId) && this.sources.has(sourceId)) this.scheduleRefresh(sourceId);
+    }
+  }
+
+  async reindexAll(showProgress = true) {
+    await this.ready;
+    const sources = [...this.sources.values()].filter(source => source.enabled);
+    const run = async (progress, token) => {
+      const results = [];
+      for (let index = 0; index < sources.length; index += 1) {
+        if (token?.isCancellationRequested) throw new Error('Knowledge Sources reindex cancelled.');
+        const source = sources[index];
+        progress?.report({ message: 'Indexando ' + source.name + ' (' + (index + 1) + '/' + sources.length + ')…' });
+        try { results.push(await this.reindexSource(source.id, false, token)); }
+        catch (error) { results.push({ id: source.id, name: source.name, status: 'error', error: error instanceof Error ? error.message : String(error) }); }
+      }
+      return results;
+    };
+    return showProgress
+      ? vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Knowledge Sources: reindexando todas', cancellable: true }, run)
+      : run(undefined, undefined);
+  }
+
+  async performReindex(source, progress, token) {
+    const config = getConfig();
+    if (!vscode.workspace.isTrusted) throw new Error('Knowledge Sources require a trusted VS Code workspace.');
+    const controller = new AbortController();
+    this.controllers.set(source.id, controller);
+    const cancellation = token?.onCancellationRequested(() => controller.abort());
+    const signal = controller.signal;
+    const checkCancelled = () => { if (signal.aborted) throw new Error('Knowledge Source indexing cancelled.'); };
+    source.status = 'indexing';
+    source.error = null;
+    source.errors = [];
+    this.emitChanged();
+    try {
+      const rootUri = vscode.Uri.parse(source.rootUri);
+      const rootReal = await fs.realpath(source.rootPath);
+      const include = new vscode.RelativePattern(rootUri, INCLUDE_GLOB);
+      const exclude = new vscode.RelativePattern(rootUri, EXCLUDE_GLOB);
+      const maxFiles = Math.max(1, Number(config.rag.knowledgeSources.maxFiles || 2000));
+      const found = await vscode.workspace.findFiles(include, exclude, maxFiles + 1);
+      const truncated = found.length > maxFiles;
+      const files = found.slice(0, maxFiles);
+      const previous = this.documents.get(source.id) || {};
+      const nextDocuments = {};
+      const changed = [];
+      if (truncated) source.errors.push({ file: '', message: 'Source exceeded maxFiles; additional documents were not scanned.' });
+      let processed = 0;
+      for (const uri of files) {
+        checkCancelled();
+        processed += 1;
+        if (processed % 15 === 0) progress?.report({ message: 'Lendo ' + processed + '/' + files.length + ' arquivos…' });
+        const filename = normalizeRelative(path.relative(source.rootPath, uri.fsPath));
+        if (!filename || filename.startsWith('../') || isSensitiveFilename(filename)) continue;
+        try {
+          const realPath = await fs.realpath(uri.fsPath);
+          if (!isInside(rootReal, realPath)) {
+            source.errors.push({ file: filename, message: 'Resolved path escapes the selected source folder.' });
+            continue;
+          }
+          const stat = await fs.stat(realPath);
+          if (!stat.isFile() || stat.size > config.rag.knowledgeSources.maxFileBytes) {
+            if (stat.isFile() && stat.size > config.rag.knowledgeSources.maxFileBytes) {
+              source.errors.push({ file: filename, message: 'File exceeds maxFileBytes and was skipped.' });
+            }
+            continue;
+          }
+          const bytes = await fs.readFile(realPath);
+          if (looksBinary(bytes)) continue;
+          const hash = sha256(bytes);
+          const old = previous[filename];
+          if (old?.hash === hash && Array.isArray(old.chunks) && !source.needsRechunk) {
+            nextDocuments[filename] = old;
+            continue;
+          }
+          const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+          const parsed = parseDocument(filename, text, config.rag.knowledgeSources);
+          const doc = {
+            hash,
+            size: stat.size,
+            mtime: stat.mtime,
+            chunks: parsed.map((chunk, index) => ({
+              id: source.id + ':' + hash.slice(0, 12) + ':' + index,
+              title: chunk.title || '',
+              section: chunk.section || '',
+              startLine: Number.isInteger(chunk.startLine) ? chunk.startLine : null,
+              endLine: Number.isInteger(chunk.endLine) ? chunk.endLine : null,
+              text: chunk.text,
+              vector: undefined
+            }))
+          };
+          nextDocuments[filename] = doc;
+          changed.push(filename);
+        } catch (error) {
+          if (previous[filename]) nextDocuments[filename] = previous[filename];
+          source.errors.push({ file: filename, message: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      if (truncated) {
+        for (const [filename, document] of Object.entries(previous)) {
+          if (!Object.prototype.hasOwnProperty.call(nextDocuments, filename)) nextDocuments[filename] = document;
+        }
+      }
+      checkCancelled();
+      let chunks = this.flattenDocuments(source, nextDocuments);
+      let embeddingFailed = false;
+      const vectorEnabled = config.rag.embedding.enabled && config.rag.strategy !== 'bm25';
+      if (vectorEnabled && chunks.some(chunk => !chunk.vector?.length)) {
+        try {
+          const pending = chunks.filter(chunk => !chunk.vector?.length);
+          const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 16));
+          for (let i = 0; i < pending.length; i += batchSize) {
+            checkCancelled();
+            const batch = pending.slice(i, i + batchSize);
+            const inputs = batch.map(chunk => 'source: ' + source.name + '\nfile: ' + chunk.filename + '\nsection: ' + (chunk.section || '') + '\n' + chunk.text).map(value => value.slice(0, config.rag.embedding.maxCharacters));
+            const vectors = await this.client.embed(inputs, signal);
+            for (const vector of vectors) {
+              if (source.embeddingDimension && vector.length !== source.embeddingDimension) throw new Error('Embedding dimension changed from ' + source.embeddingDimension + ' to ' + vector.length + '. Rebuild this source using a consistent embedding model.');
+            }
+            for (let j = 0; j < batch.length; j += 1) {
+              const target = nextDocuments[batch[j].filename].chunks.find(item => item.id === batch[j].id);
+              if (target) target.vector = vectors[j];
+            }
+            progress?.report({ message: 'Criando embeddings ' + Math.min(i + batch.length, pending.length) + '/' + pending.length + '…' });
+          }
+        } catch (error) {
+          if (signal.aborted) throw error;
+          source.error = 'Embeddings indisponíveis; busca BM25 permanece disponível: ' + (error instanceof Error ? error.message : String(error));
+          embeddingFailed = true;
+          this.output?.appendLine('[knowledge-sources] ' + source.name + ': ' + source.error);
+        }
+      }
+      chunks = this.flattenDocuments(source, nextDocuments);
+      const dimensions = new Set(chunks.filter(chunk => chunk.vector?.length).map(chunk => chunk.vector.length));
+      if (dimensions.size > 1) throw new Error('Embedding vectors have inconsistent dimensions; the previous index was preserved.');
+      this.documents.set(source.id, nextDocuments);
+      this.indexes.set(source.id, chunks);
+      source.embeddingDimension = dimensions.size === 1 ? [...dimensions][0] : source.embeddingDimension;
+      source.needsRechunk = false;
+      source.needsEmbedding = !embeddingFailed && vectorEnabled && chunks.some(chunk => !chunk.vector?.length);
+      source.files = Object.keys(nextDocuments).length;
+      source.chunks = chunks.length;
+      source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
+      source.lastIndexedAt = new Date().toISOString();
+      source.status = 'indexed';
+      if (source.errors.length && !source.error) source.error = source.errors.length + ' file(s) could not be indexed.';
+      source.updatedAt = source.lastIndexedAt;
+      await this.saveIndex(source);
+      await this.persistCatalog();
+      this.output?.appendLine('[knowledge-sources] Indexed ' + source.name + ': ' + source.files + ' files / ' + source.chunks + ' chunks / ' + source.vectors + ' vectors; updated ' + changed.length + ' file(s).');
+      progress?.report({ message: 'Concluído: ' + source.files + ' arquivos, ' + source.chunks + ' chunks.' });
+      return this.summarize(source);
+    } catch (error) {
+      source.status = signal.aborted ? 'cancelled' : 'error';
+      source.error = error instanceof Error ? error.message : String(error);
+      if (!signal.aborted) this.output?.appendLine('[knowledge-sources:error] ' + source.name + ': ' + source.error);
+      await this.persistCatalog().catch(() => {});
+      throw error;
+    } finally {
+      cancellation?.dispose();
+      this.controllers.delete(source.id);
+      this.emitChanged();
+    }
+  }
+
+  async getChunks(options = {}) {
+    await this.ready;
+    const config = getConfig();
+    if (config.rag.enabled === false || config.rag.knowledgeSources.enabled === false) return [];
+    const output = [];
+    const selectedIds = Array.isArray(options.sourceIds) && options.sourceIds.length ? new Set(options.sourceIds.map(String)) : null;
+    for (const source of this.sources.values()) {
+      if (!source.enabled || (selectedIds && !selectedIds.has(source.id))) continue;
+      if ((source.status !== 'indexed' || source.needsRechunk) && config.rag.knowledgeSources.autoIndex) {
+        try { await this.reindexSource(source.id, false); } catch (error) {
+          this.output?.appendLine('[knowledge-sources] automatic indexing skipped for ' + source.name + ': ' + error.message);
+        }
+      }
+      if (source.needsEmbedding && config.rag.knowledgeSources.autoIndex) {
+        try { await this.refreshCachedEmbeddings(source, options.signal); } catch (error) {
+          source.needsEmbedding = false;
+          source.error = 'Embeddings indisponíveis; busca BM25 permanece disponível: ' + (error instanceof Error ? error.message : String(error));
+          this.output?.appendLine('[knowledge-sources] embedding refresh failed for ' + source.name + ': ' + error.message);
+          this.emitChanged();
+        }
+      }
+      output.push(...(this.indexes.get(source.id) || []));
+    }
+    return output;
+  }
+
+  async refreshCachedEmbeddings(source, signal) {
+    const config = getConfig();
+    const documents = this.documents.get(source.id) || {};
+    const chunks = this.flattenDocuments(source, documents);
+    const pending = chunks.filter(chunk => !chunk.vector?.length);
+    if (config.rag.embedding.enabled && config.rag.strategy !== 'bm25' && pending.length) {
+      const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 16));
+      for (let i = 0; i < pending.length; i += batchSize) {
+        if (signal?.aborted) throw new Error('Embedding refresh cancelled.');
+        const batch = pending.slice(i, i + batchSize);
+        const vectors = await this.client.embed(batch.map(chunk => ('source: ' + source.name + '\nfile: ' + chunk.filename + '\n' + chunk.text).slice(0, config.rag.embedding.maxCharacters)), signal);
+        for (const vector of vectors) {
+          if (source.embeddingDimension && vector.length !== source.embeddingDimension) throw new Error('Embedding dimension changed from ' + source.embeddingDimension + ' to ' + vector.length + '.');
+        }
+        for (let j = 0; j < batch.length; j += 1) {
+          const target = documents[batch[j].filename]?.chunks?.find(item => item.id === batch[j].id);
+          if (target) target.vector = vectors[j];
+        }
+      }
+    }
+    const refreshed = this.flattenDocuments(source, documents);
+    const dimensions = new Set(refreshed.filter(chunk => chunk.vector?.length).map(chunk => chunk.vector.length));
+    if (dimensions.size > 1) throw new Error('Embedding vectors have inconsistent dimensions.');
+    this.indexes.set(source.id, refreshed);
+    source.vectors = refreshed.filter(chunk => chunk.vector?.length).length;
+    source.embeddingDimension = dimensions.size === 1 ? [...dimensions][0] : source.embeddingDimension;
+    source.needsEmbedding = false;
+    source.error = null;
+    await this.saveIndex(source);
+    await this.persistCatalog();
+    this.emitChanged();
+  }
+
+  flattenDocuments(source, documents) {
+    const chunks = [];
+    for (const [filename, document] of Object.entries(documents)) {
+      for (const chunk of document.chunks || []) chunks.push(this.toSearchChunk(source, filename, chunk, document.hash));
+    }
+    return chunks;
+  }
+
+  toSearchChunk(source, filename, chunk, documentHash) {
+    const uri = vscode.Uri.file(path.join(source.rootPath, filename));
+    const searchablePath = source.name + ' ' + filename + ' ' + (chunk.title || '') + ' ' + (chunk.section || '');
+    const content = String(chunk.text || '');
+    return {
+      id: chunk.id,
+      uri,
+      sourceId: source.id,
+      sourceName: source.name,
+      sourceType: 'local-folder',
+      filename: normalizeRelative(filename),
+      displayFilename: source.name + '/' + normalizeRelative(filename),
+      title: chunk.title || '',
+      section: chunk.section || '',
+      startLine: Number.isInteger(chunk.startLine) ? chunk.startLine : null,
+      endLine: Number.isInteger(chunk.endLine) ? chunk.endLine : null,
+      text: content,
+      hash: documentHash,
+      vector: Array.isArray(chunk.vector) ? chunk.vector : undefined,
+      tokens: tokenize(searchablePath + ' ' + content),
+      pathTokens: new Set(tokenize(searchablePath))
+    };
+  }
+
+  setupWatcher(source) {
+    if (!source.enabled || this.watchers.has(source.id) || getConfig().rag.knowledgeSources.watch === false) return;
+    try {
+      const pattern = new vscode.RelativePattern(vscode.Uri.parse(source.rootUri), '**/*');
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+      const refresh = () => this.scheduleRefresh(source.id);
+      watcher.onDidCreate(refresh);
+      watcher.onDidChange(refresh);
+      watcher.onDidDelete(refresh);
+      this.watchers.set(source.id, watcher);
+    } catch (error) {
+      this.output?.appendLine('[knowledge-sources] watcher unavailable for ' + source.name + ': ' + error.message);
+    }
+  }
+
+  scheduleRefresh(sourceId) {
+    const source = this.sources.get(sourceId);
+    if (!source || source.status === 'error' || source.status === 'cancelled') return;
+    const previous = this.watchTimers.get(sourceId);
+    if (previous) clearTimeout(previous);
+    this.watchTimers.set(sourceId, setTimeout(() => {
+      this.watchTimers.delete(sourceId);
+      if (this.indexing.has(sourceId)) { this.pendingRefresh.add(sourceId); return; }
+      this.reindexSource(sourceId, false).catch(error => this.output?.appendLine('[knowledge-sources] watcher refresh failed: ' + error.message));
+    }, 700));
+  }
+
+  disposeWatcher(sourceId) {
+    this.watchers.get(sourceId)?.dispose();
+    this.watchers.delete(sourceId);
+    const timer = this.watchTimers.get(sourceId);
+    if (timer) clearTimeout(timer);
+    this.watchTimers.delete(sourceId);
+  }
+
+  async listSources() {
+    await this.ready;
+    return this.listSourcesSync();
+  }
+
+  listSourcesSync() {
+    return [...this.sources.values()].map(source => this.summarize(source));
+  }
+
+  summarize(source) {
+    return {
+      id: source.id,
+      name: source.name,
+      type: source.type,
+      rootUri: source.rootUri,
+      rootPath: source.rootPath,
+      enabled: source.enabled,
+      createdAt: source.createdAt,
+      updatedAt: source.updatedAt,
+      lastIndexedAt: source.lastIndexedAt,
+      status: source.status,
+      files: source.files,
+      chunks: source.chunks,
+      vectors: source.vectors,
+      error: source.error,
+      errors: (source.errors || []).slice(0, 30),
+      documents: Object.keys(this.documents.get(source.id) || {}).slice(0, 20),
+      indexing: this.indexing.has(source.id)
+    };
+  }
+
+  async openDocument(sourceId, filename) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    const relative = normalizeRelative(filename);
+    if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) throw new Error('Invalid source document path.');
+    const absolute = path.resolve(source.rootPath, relative);
+    if (!isInside(source.rootPath, absolute)) throw new Error('Document path escapes its source folder.');
+    const real = await fs.realpath(absolute);
+    if (!isInside(await fs.realpath(source.rootPath), real)) throw new Error('Document symlink escapes its source folder.');
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(real));
+    await vscode.window.showTextDocument(document, { preview: false });
+    return { filename: relative };
+  }
+
+  requireSource(sourceId) {
+    const source = this.sources.get(String(sourceId || ''));
+    if (!source) throw new Error('Knowledge Source not found.');
+    return source;
+  }
+
+  emitChanged() {
+    this.emitter.fire({ sources: this.listSourcesSync() });
+  }
+
+  handleConfigurationChange(event) {
+    this.updateWatchers();
+    const parserKeys = ['chunkLines', 'chunkOverlapLines', 'chunkCharacters', 'chunkOverlapCharacters'];
+    const scanKeys = ['maxFiles', 'maxFileBytes'];
+    const parserChanged = parserKeys.some(key => event.affectsConfiguration('llamaCpp.rag.knowledgeSources.' + key));
+    const scanChanged = scanKeys.some(key => event.affectsConfiguration('llamaCpp.rag.knowledgeSources.' + key));
+    if (parserChanged || scanChanged) {
+      for (const source of this.sources.values()) {
+        source.status = 'stale';
+        if (parserChanged) source.needsRechunk = true;
+      }
+      this.emitChanged();
+    }
+  }
+
+  updateWatchers() {
+    for (const source of this.sources.values()) {
+      if (getConfig().rag.knowledgeSources.watch === false || !source.enabled) this.disposeWatcher(source.id);
+      else this.setupWatcher(source);
+    }
+  }
+
+  dispose() {
+    for (const sourceId of [...this.watchers.keys()]) this.disposeWatcher(sourceId);
+    for (const controller of this.controllers.values()) controller.abort();
+    this.emitter.dispose();
+  }
+}
+
+function embeddingFingerprint() {
+  const config = getConfig();
+  return [
+    config.provider, config.mode, config.api.baseUrl, config.api.model,
+    config.local.host, config.local.port, config.local.modelPath,
+    config.rag.embedding.baseUrl, config.rag.embedding.model,
+    config.openai.embeddingModel, config.openai.useForEmbeddings,
+    config.rag.embedding.enabled
+  ].join('|');
+}
+function parserFingerprint() {
+  const options = getConfig().rag.knowledgeSources;
+  return [INDEX_VERSION, options.chunkLines, options.chunkOverlapLines, options.chunkCharacters, options.chunkOverlapCharacters].join('|');
+}
+module.exports = { KnowledgeSourcesManager, embeddingFingerprint, parserFingerprint, INCLUDE_GLOB, EXCLUDE_GLOB };

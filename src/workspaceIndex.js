@@ -1,9 +1,10 @@
 const vscode = require('vscode');
 const { getConfig } = require('./config');
+const { reciprocalRankFusion, diversifyResults } = require('./knowledgeSources/retrievalUtils');
 
 class WorkspaceIndex {
-  constructor(client, output, storageUri) {
-    this.client = client; this.output = output; this.storageUri = storageUri;
+  constructor(client, output, storageUri, knowledgeSources) {
+    this.client = client; this.output = output; this.storageUri = storageUri; this.knowledgeSources = knowledgeSources;
     this.chunks = []; this.indexed = false; this.indexing = undefined; this.indexedAt = undefined; this.vectorError = undefined; this.watcher = undefined;
     this.setupWatcher();
   }
@@ -51,25 +52,123 @@ class WorkspaceIndex {
     const batch=Math.max(1,c.rag.embedding.batchSize);
     for(let i=0;i<chunks.length;i+=batch){ const slice=chunks.slice(i,i+batch), inputs=slice.map(x=>`file: ${x.filename}\nlines: ${x.startLine}-${x.endLine}\n${x.text}`.slice(0,c.rag.embedding.maxCharacters)); const vectors=await this.client.embed(inputs); vectors.forEach((v,j)=>slice[j].vector=v); progress?.report({message:`Embedding ${Math.min(i+slice.length,chunks.length)}/${chunks.length} chunks…`}); }
   }
-  async search(query,options={}) {
-    const c=getConfig(); if(!c.rag.enabled||!String(query).trim()) return []; await this.ensureIndexed(); if(!this.indexed||!this.chunks.length) return [];
-    const exclude=options.excludeUri?.toString()||'', topK=Math.max(1,options.topK||c.rag.topK), candidates=Math.min(this.chunks.length,Math.max(topK*4,c.rag.rerank.candidates||topK));
-    const bm25=this.rankBm25(query,candidates,exclude); let vector=[];
-    if(c.rag.strategy!=='bm25'&&this.chunks.some(x=>x.vector?.length)) try { const [qv]=await this.client.embed([String(query).slice(-12000)],options.signal); vector=this.rankVector(qv,candidates,exclude); } catch(e){ this.vectorError=e instanceof Error?e.message:String(e); }
+  async search(query, options = {}) {
+    const config = getConfig();
+    if (!config.rag.enabled || !String(query).trim()) return [];
+    await this.ensureIndexed();
+    const workspaceChunks = options.includeWorkspace === false ? [] : this.chunks;
+    let sourceChunks = [];
+    if (this.knowledgeSources && options.includeKnowledgeSources !== false) {
+      try {
+        sourceChunks = await this.knowledgeSources.getChunks({ sourceIds: options.sourceIds, signal: options.signal });
+      } catch (error) {
+        this.output?.appendLine('[rag] Knowledge Sources unavailable; continuing with workspace results: ' + (error instanceof Error ? error.message : String(error)));
+      }
+    }
+    const pool = [...workspaceChunks, ...sourceChunks];
+    if (!pool.length) return [];
+
+    const exclude = options.excludeUri?.toString() || '';
+    const topK = Math.max(1, options.topK || config.rag.topK);
+    const candidates = Math.min(pool.length, Math.max(topK * 5, config.rag.rerank.candidates || topK));
+    const bm25 = this.rankBm25(query, candidates, exclude, pool);
+    let vector = [];
+    if (config.rag.strategy !== 'bm25' && pool.some(chunk => chunk.vector?.length)) {
+      try {
+        const [queryVector] = await this.client.embed([String(query).slice(-12000)], options.signal);
+        vector = this.rankVector(queryVector, candidates, exclude, pool);
+      } catch (error) {
+        this.vectorError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
     let merged;
-    if(c.rag.strategy==='bm25') merged=bm25; else if(c.rag.strategy==='vector'&&vector.length) merged=vector; else if(vector.length&&bm25.length) merged=rrf(bm25,vector,candidates); else merged=vector.length?vector:bm25;
-    if(c.rag.rerank.enabled&&merged.length>1) try { const subset=merged.slice(0,Math.min(c.rag.rerank.candidates,merged.length)); const ranks=await this.client.rerank(query,subset.map(x=>x.text),options.signal); if(ranks?.length){ const map=new Map(ranks.map(r=>[r.index,r.score])); subset.forEach((x,i)=>x.rerankScore=map.get(i)??-Infinity); subset.sort((a,b)=>b.rerankScore-a.rerankScore); merged=subset.concat(merged.slice(subset.length)); } } catch(e){ this.output.appendLine(`[rag] rerank fallback: ${e.message||e}`); }
-    return merged.slice(0,topK);
+    if (config.rag.strategy === 'bm25') merged = bm25;
+    else if (config.rag.strategy === 'vector' && vector.length) merged = vector;
+    else if (vector.length && bm25.length) merged = rrf(bm25, vector, candidates);
+    else merged = vector.length ? vector : bm25;
+
+    if (config.rag.rerank.enabled && merged.length > 1) {
+      try {
+        const subset = merged.slice(0, Math.min(config.rag.rerank.candidates, merged.length));
+        const ranks = await this.client.rerank(query, subset.map(chunk => chunk.text), options.signal);
+        if (ranks?.length) {
+          const scores = new Map(ranks.map(item => [item.index, item.score]));
+          subset.forEach((chunk, index) => { chunk.rerankScore = scores.get(index) ?? -Infinity; });
+          subset.sort((a, b) => b.rerankScore - a.rerankScore);
+          merged = subset.concat(merged.slice(subset.length));
+        }
+      } catch (error) {
+        this.output.appendLine(`[rag] rerank fallback: ${error.message || error}`);
+      }
+    }
+    return diversifyResults(merged, topK);
   }
-  rankBm25(query,limit,exclude) {
-    const q=[...new Set(tokenize(query))]; const N=this.chunks.length, df=new Map(); for(const ch of this.chunks){ for(const t of new Set(ch.tokens)) df.set(t,(df.get(t)||0)+1); }
-    const avg=this.chunks.reduce((s,x)=>s+x.tokens.length,0)/Math.max(1,N), out=[];
-    for(const ch of this.chunks){ if(exclude&&ch.uri.toString()===exclude) continue; const counts=countTokens(ch.tokens); let score=0; for(const t of q){ const tf=counts.get(t)||0;if(!tf)continue; const idf=Math.log(1+(N-(df.get(t)||0)+.5)/((df.get(t)||0)+.5)); const denom=tf+1.2*(.25+.75*(ch.tokens.length/Math.max(1,avg))); score+=idf*((tf*2.2)/denom); if(ch.pathTokens.has(t))score+=idf*1.8; } if(score>0) out.push({...ch,score,retrieval:'bm25'}); }
-    return out.sort((a,b)=>b.score-a.score).slice(0,limit);
+  rankBm25(query, limit, exclude, chunks = this.chunks) {
+    const terms = [...new Set(tokenize(query))];
+    const count = chunks.length;
+    const documentFrequency = new Map();
+    for (const chunk of chunks) {
+      for (const term of new Set(chunk.tokens)) documentFrequency.set(term, (documentFrequency.get(term) || 0) + 1);
+    }
+    const averageLength = chunks.reduce((sum, chunk) => sum + chunk.tokens.length, 0) / Math.max(1, count);
+    const output = [];
+    for (const chunk of chunks) {
+      if (exclude && chunk.uri.toString() === exclude) continue;
+      const frequencies = countTokens(chunk.tokens);
+      let score = 0;
+      for (const term of terms) {
+        const frequency = frequencies.get(term) || 0;
+        if (!frequency) continue;
+        const df = documentFrequency.get(term) || 0;
+        const idf = Math.log(1 + (count - df + 0.5) / (df + 0.5));
+        const denominator = frequency + 1.2 * (0.25 + 0.75 * (chunk.tokens.length / Math.max(1, averageLength)));
+        score += idf * ((frequency * 2.2) / denominator);
+        if (chunk.pathTokens.has(term)) score += idf * 1.8;
+      }
+      if (score > 0) output.push({ ...chunk, score, retrieval: 'bm25' });
+    }
+    return output.sort((a, b) => b.score - a.score).slice(0, limit);
   }
-  rankVector(q,limit,exclude){ return this.chunks.filter(x=>x.vector?.length&&(!exclude||x.uri.toString()!==exclude)&&x.vector.length===q.length).map(x=>({...x,score:dot(q,x.vector),retrieval:'vector'})).sort((a,b)=>b.score-a.score).slice(0,limit); }
-  toExtraFiles(results,maxChars=12000){ let left=maxChars; const out=[]; for(const r of results){ if(left<=0)break; const text=r.text.slice(0,left); out.push({filename:r.filename,text}); left-=text.length; } return out; }
-  formatForChat(results,maxChars=24000){ let left=maxChars; const blocks=[]; for(const r of results){ if(left<=0)break; const text=r.text.slice(0,left); blocks.push(`<workspace_chunk file="${escapeAttr(r.filename)}" lines="${r.startLine}-${r.endLine}">\n${text}\n</workspace_chunk>`); left-=text.length; } return blocks.join('\n\n'); }
+  rankVector(queryVector, limit, exclude, chunks = this.chunks) {
+    return chunks
+      .filter(chunk => chunk.vector?.length && (!exclude || chunk.uri.toString() !== exclude) && chunk.vector.length === queryVector.length)
+      .map(chunk => ({ ...chunk, score: dot(queryVector, chunk.vector), retrieval: 'vector' }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+  }
+  toExtraFiles(results, maxChars = 12000) {
+    let remaining = maxChars; const output = [];
+    for (const result of results) {
+      if (remaining <= 0) break;
+      const text = result.text.slice(0, remaining);
+      output.push({ filename: result.displayFilename || result.filename, text });
+      remaining -= text.length;
+    }
+    return output;
+  }
+  formatForChat(results, maxChars = 24000) {
+    let remaining = maxChars; const blocks = [];
+    for (const result of results) {
+      if (remaining <= 0) break;
+      const text = result.text.slice(0, remaining);
+      const filename = escapeAttr(result.displayFilename || result.filename);
+      if (result.sourceId) {
+        const attrs = [
+          `source="${escapeAttr(result.sourceName || 'Knowledge Source')}"`,
+          `file="${filename}"`,
+          result.title ? `title="${escapeAttr(result.title)}"` : '',
+          result.section ? `section="${escapeAttr(result.section)}"` : '',
+          Number.isInteger(result.startLine) && Number.isInteger(result.endLine) ? `lines="${result.startLine}-${result.endLine}"` : ''
+        ].filter(Boolean).join(' ');
+        blocks.push(`<knowledge_source ${attrs}>\n${text}\n</knowledge_source>`);
+      } else {
+        blocks.push(`<workspace_chunk file="${filename}" lines="${result.startLine}-${result.endLine}">\n${text}\n</workspace_chunk>`);
+      }
+      remaining -= text.length;
+    }
+    return blocks.join('\n\n');
+  }
   async getMentionedFileContext(question,maxChars=30000,maxFiles=6){ const mentions=parseFileMentions(question).slice(0,maxFiles), files=[], unresolved=[], blocks=[]; let left=maxChars; for(const m of mentions){ const found=await this.findMention(m); if(!found){unresolved.push(m);continue;} try{ const bytes=await vscode.workspace.fs.readFile(found.uri); const text=new TextDecoder().decode(bytes).slice(0,left); blocks.push(`<mentioned_file file="${escapeAttr(found.filename)}">\n${text}\n</mentioned_file>`); files.push(found.filename); left-=text.length; if(left<=0)break; }catch{unresolved.push(m);} } return {context:blocks.join('\n\n'),files,unresolved}; }
   async findMention(raw){ const target=normalizePath(raw), base=target.split('/').pop(); if(!base)return; const c=getConfig(), uris=await vscode.workspace.findFiles(`**/${base}`,c.rag.excludeGlob||undefined,30); return uris.map(uri=>{const display=vscode.workspace.asRelativePath(uri,true),n=normalizePath(display);return{uri,filename:display,rank:n===target?100:n.endsWith('/'+target)?90:n.split('/').pop()===base?70:0};}).sort((a,b)=>b.rank-a.rank||a.filename.length-b.filename.length)[0]; }
   cacheUri(){ return this.storageUri?vscode.Uri.joinPath(this.storageUri,'rag-index.json'):undefined; }
@@ -80,9 +179,9 @@ class WorkspaceIndex {
 function tokenize(v){ return String(v||'').replace(/([a-z0-9])([A-Z])/g,'$1 $2').toLowerCase().match(/[a-z_][a-z0-9_$.-]{1,63}|\d{2,}/g)||[]; }
 function countTokens(tokens){ const m=new Map(); for(const t of tokens)m.set(t,(m.get(t)||0)+1); return m; }
 function dot(a,b){ let n=0;for(let i=0;i<a.length;i++)n+=a[i]*b[i];return n; }
-function rrf(a,b,limit){ const scores=new Map(),items=new Map(); for(const list of [a,b]) list.forEach((x,i)=>{const k=`${x.uri}#${x.startLine}:${x.endLine}`;items.set(k,x);scores.set(k,(scores.get(k)||0)+1/(61+i));}); return [...items.entries()].map(([k,x])=>({...x,score:scores.get(k),retrieval:'hybrid'})).sort((x,y)=>y.score-x.score).slice(0,limit); }
+function rrf(a,b,limit){ return reciprocalRankFusion(a,b,limit); }
 function parseFileMentions(text){ const out=[],re=/@"([^"]+)"|@([A-Za-z0-9_.\\/-]+\.[A-Za-z0-9_-]+)/g; let m; while((m=re.exec(String(text||'')))){const v=(m[1]||m[2]||'').trim();if(v&&!out.includes(v))out.push(v);}return out; }
 function normalizePath(v){ return String(v||'').trim().replace(/^\.\//,'').replace(/\\/g,'/').replace(/^\/+/, '').toLowerCase(); }
 function looksBinary(bytes){ const n=Math.min(bytes.length,4096);if(!n)return false;let suspicious=0;for(let i=0;i<n;i++){const b=bytes[i];if(b===0)return true;if(b<7||(b>14&&b<32))suspicious++;}return suspicious/n>.08; }
 function escapeAttr(v){ return String(v).replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[c])); }
-module.exports={WorkspaceIndex,tokenize,parseFileMentions};
+module.exports={WorkspaceIndex,tokenize,parseFileMentions,diversifyResults};

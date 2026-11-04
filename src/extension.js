@@ -5,6 +5,8 @@ const { LlamaClient } = require('./llamaClient');
 const { LocalServerManager } = require('./localServer');
 const { PerformanceIndicator } = require('./performance');
 const { WorkspaceIndex } = require('./workspaceIndex');
+const { KnowledgeSourcesManager } = require('./knowledgeSources/KnowledgeSourcesManager');
+const { KnowledgeSourcesViewProvider, VIEW_ID: KNOWLEDGE_SOURCES_VIEW_ID } = require('./sidebar/KnowledgeSourcesViewProvider');
 const { LlamaLanguageModelProvider, VENDOR } = require('./nativeModelProvider');
 const { registerNativeChat } = require('./nativeChat');
 const { EditorActions } = require('./editorActions');
@@ -17,18 +19,21 @@ function activate(context) {
   const output = vscode.window.createOutputChannel('llama.cpp Assistant');
   const localServer = new LocalServerManager(output);
   const client = new LlamaClient(context.secrets, localServer, output);
-  const workspaceIndex = new WorkspaceIndex(client, output, context.storageUri || context.globalStorageUri);
-  const agentController = new AgentController(context, client, output);
+  const knowledgeSources = new KnowledgeSourcesManager(client, output, context.globalStorageUri);
+  const workspaceIndex = new WorkspaceIndex(client, output, context.storageUri || context.globalStorageUri, knowledgeSources);
+  const agentController = new AgentController(context, client, output, workspaceIndex);
   const classicChat = new ChatPanel(client, workspaceIndex, context.extensionUri, agentController);
   const performance = new PerformanceIndicator(client);
   const editorActions = new EditorActions(client, classicChat, context);
   const nativeProvider = new LlamaLanguageModelProvider(client);
   const inlineSuggestions = new InlineSuggestionsController(context);
   const assistantView = new AssistantViewProvider(client, workspaceIndex, agentController, context.extensionUri, output);
+  const knowledgeSourcesView = new KnowledgeSourcesViewProvider(knowledgeSources, context.extensionUri, output);
 
-  context.subscriptions.push(output, localServer, client, workspaceIndex, classicChat, performance, editorActions, nativeProvider, inlineSuggestions, agentController, assistantView);
+  context.subscriptions.push(output, localServer, client, knowledgeSources, workspaceIndex, classicChat, performance, editorActions, nativeProvider, inlineSuggestions, agentController, assistantView, knowledgeSourcesView);
   context.subscriptions.push(vscode.languages.registerInlineCompletionItemProvider({ scheme: 'file' }, new LlamaInlineCompletionProvider(client, workspaceIndex, inlineSuggestions)));
   context.subscriptions.push(vscode.window.registerWebviewViewProvider(VIEW_ID, assistantView, { webviewOptions: { retainContextWhenHidden: true } }));
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider(KNOWLEDGE_SOURCES_VIEW_ID, knowledgeSourcesView, { webviewOptions: { retainContextWhenHidden: true } }));
   if (vscode.lm?.registerLanguageModelChatProvider) context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider(VENDOR, nativeProvider));
   const nativeParticipant = registerNativeChat(context, client, workspaceIndex, agentController);
   if (nativeParticipant) context.subscriptions.push(nativeParticipant);
@@ -78,7 +83,18 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('llamaCpp.triggerCompletion', () => vscode.commands.executeCommand('editor.action.inlineSuggest.trigger')),
     vscode.commands.registerCommand('llamaCpp.reindexWorkspace', async () => { try { const result = await workspaceIndex.reindex(true); classicChat.postRagState(); vscode.window.showInformationMessage(`llama.cpp RAG: indexed ${result.files} files / ${result.chunks} chunks / ${result.vectors} vectors.`); } catch (error) { vscode.window.showErrorMessage(`llama.cpp RAG: ${error instanceof Error ? error.message : String(error)}`); } }),
-    vscode.commands.registerCommand('llamaCpp.showIndexStatus', () => { const status = workspaceIndex.status(); const when = status.indexedAt ? ` Last index: ${status.indexedAt.toLocaleString()}.` : ''; const vectorNote = status.vectorError ? ' Vector fallback active.' : ''; vscode.window.showInformationMessage(`llama.cpp RAG: ${status.enabled ? 'enabled' : 'disabled'} (${status.strategy}), ${status.files} files / ${status.chunks} chunks / ${status.vectors} vectors.${when}${vectorNote}`); })
+    vscode.commands.registerCommand('llamaCpp.showIndexStatus', () => { const status = workspaceIndex.status(); const when = status.indexedAt ? ` Last index: ${status.indexedAt.toLocaleString()}.` : ''; const vectorNote = status.vectorError ? ' Vector fallback active.' : ''; vscode.window.showInformationMessage(`llama.cpp RAG: ${status.enabled ? 'enabled' : 'disabled'} (${status.strategy}), ${status.files} files / ${status.chunks} chunks / ${status.vectors} vectors.${when}${vectorNote}`); }),
+    vscode.commands.registerCommand('llamaCpp.openKnowledgeSources', async () => {
+      try { await vscode.commands.executeCommand(`${KNOWLEDGE_SOURCES_VIEW_ID}.focus`); }
+      catch { await vscode.commands.executeCommand('workbench.view.extension.llamaCppKnowledgeSources'); }
+    }),
+    vscode.commands.registerCommand('llamaCpp.reindexKnowledgeSources', async () => {
+      try {
+        const results = await knowledgeSources.reindexAll(true);
+        const errors = results.filter(item => item.status === 'error');
+        vscode.window.showInformationMessage(`Knowledge Sources: ${results.length - errors.length} fonte(s) indexada(s), ${errors.length} com erro.`);
+      } catch (error) { vscode.window.showErrorMessage(`Knowledge Sources: ${error instanceof Error ? error.message : String(error)}`); }
+    })
   );
 
   context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
@@ -86,6 +102,7 @@ function activate(context) {
     if (event.affectsConfiguration('llamaCpp.provider') || event.affectsConfiguration('llamaCpp.openai') || event.affectsConfiguration('llamaCpp.api') || event.affectsConfiguration('llamaCpp.mode') || event.affectsConfiguration('llamaCpp.local')) {
       refreshProviderSurfaces(nativeProvider, assistantView, classicChat);
     }
+    if (event.affectsConfiguration('llamaCpp.rag.knowledgeSources')) knowledgeSources.handleConfigurationChange(event);
     if (event.affectsConfiguration('llamaCpp.rag')) classicChat.postRagState();
   }));
 }
