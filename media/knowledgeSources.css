@@ -20,6 +20,8 @@ button:disabled { opacity: .5; cursor: default; }
 .source-path { overflow: hidden; margin: 6px 0; color: var(--vscode-descriptionForeground); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .source-stats { margin: 5px 0; font-size: 11px; }
 .source-updated { margin: 5px 0 8px; font-size: 10px; opacity: .68; }
+.source-filters { margin: 5px 0; color: var(--vscode-descriptionForeground); font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.source-progress { margin: 6px 0 8px; color: var(--vscode-progressBar-background); font-size: 10px; font-variant-numeric: tabular-nums; }
 .source-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .enabled-toggle { display: flex; align-items: center; gap: 5px; margin-right: auto; font-size: 10px; }
 .enabled-toggle input { margin: 0; }
