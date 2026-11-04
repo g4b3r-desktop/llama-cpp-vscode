@@ -934,6 +934,7 @@ class KnowledgeSourcesManager {
     await this.ready;
     const source = this.requireSource(sourceId);
     source.tags = normalizeSourceTags(tags);
+    for (const chunk of this.indexes.get(source.id) || []) chunk.tags = source.tags;
     source.updatedAt = new Date().toISOString();
     await this.persistCatalog();
     this.emitChanged();
@@ -944,6 +945,7 @@ class KnowledgeSourcesManager {
     await this.ready;
     const source = this.requireSource(sourceId);
     source.rerankEnabled = Boolean(enabled);
+    for (const chunk of this.indexes.get(source.id) || []) chunk.rerankEnabled = source.rerankEnabled;
     source.updatedAt = new Date().toISOString();
     await this.persistCatalog();
     this.emitChanged();
