@@ -1120,7 +1120,7 @@ function embeddingFingerprint() {
   return [
     config.provider, config.mode, config.api.baseUrl, config.api.model,
     config.local.host, config.local.port, config.local.modelPath,
-    config.rag.embedding.baseUrl, config.rag.embedding.model,
+    config.rag.embedding.baseUrl, config.rag.embedding.model, config.rag.embedding.maxCharacters,
     config.openai.embeddingModel, config.openai.useForEmbeddings,
     config.rag.embedding.enabled
   ].join('|');
