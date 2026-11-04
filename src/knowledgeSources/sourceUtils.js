@@ -72,7 +72,12 @@ const DEFAULT_SOURCE_EXTENSIONS = Object.freeze([
 
 function normalizeSourceExtensions(values) {
   const items = Array.isArray(values) ? values : String(values || '').split(',');
-  const normalized = [...new Set(items.map(value => String(value || '').trim().replace(/^\.+/, '').toLowerCase()).filter(Boolean))];
+  const normalized = [...new Set(items.map(value => {
+    let directory = String(value || '').trim().replaceAll('\\', '/');
+    if (directory.startsWith('./')) directory = directory.slice(2);
+    while (directory.endsWith('/')) directory = directory.slice(0, -1);
+    return directory;
+  }).filter(Boolean))];
   if (!normalized.length) return [...DEFAULT_SOURCE_EXTENSIONS];
   const allowed = new Set(DEFAULT_SOURCE_EXTENSIONS);
   const invalid = normalized.filter(value => !/^[a-z0-9]{1,10}$/.test(value) || !allowed.has(value));
@@ -114,7 +119,12 @@ function matchesSourceFilter(filename, source) {
   const extension = path.posix.extname(normalized).slice(1).toLowerCase();
   if (!normalizeSourceExtensions(source.extensions).includes(extension)) return false;
   const directories = normalizeSourceDirectories(source.includeDirectories || []);
-  return !directories.length || directories.some(directory => normalized.startsWith(directory + '/'));
+  if (!directories.length) return true;
+  const segments = normalized.split('/');
+  return directories.some(directory => {
+    const parts = directory.split('/');
+    return segments.slice(0, -1).some((_, index) => segments.slice(index, index + parts.length).join('/') === directory);
+  });
 }
 
 module.exports = { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter };
