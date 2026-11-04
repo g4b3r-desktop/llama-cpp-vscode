@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const { parseDocument, htmlToStructuredText, chunkParagraphs } = require('../src/knowledgeSources/KnowledgeDocumentParser');
-const { isBlockedRoot, isSensitiveFilename, isInside, looksBinary, isValidSourceId } = require('../src/knowledgeSources/sourceUtils');
+const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId } = require('../src/knowledgeSources/sourceUtils');
 const { reciprocalRankFusion, diversifyResults } = require('../src/knowledgeSources/retrievalUtils');
 
 test('HTML extraction removes executable/layout noise and preserves headings and links', () => {
@@ -79,6 +79,15 @@ test('source safety filters system folders, credentials and path traversal', () 
   assert.equal(isInside('/tmp/docs', '/tmp/docs-evil/secret.txt'), false);
   assert.equal(isValidSourceId('0123456789abcdef01234567'), true);
   assert.equal(isValidSourceId('../etc/passwd'), false);
+});
+
+test('cached document paths reject traversal and absolute paths', () => {
+  assert.equal(isSafeDocumentPath('manual/api/GLTFLoader.html'), true);
+  assert.equal(isSafeDocumentPath('../secrets.txt'), false);
+  assert.equal(isSafeDocumentPath('manual/../../secrets.txt'), false);
+  assert.equal(isSafeDocumentPath('/etc/passwd'), false);
+  assert.equal(isSafeDocumentPath('C:/Windows/win.ini'), false);
+  assert.equal(isSafeDocumentPath('manual//loader.html'), false);
 });
 
 test('binary detector rejects NUL-containing content', () => {

@@ -40,6 +40,12 @@ function normalizeRelative(value) {
   return String(value || '').replace(/\\/g, '/').replace(/^\.\/+/, '');
 }
 
+function isSafeDocumentPath(value) {
+  const normalized = normalizeRelative(value);
+  return Boolean(normalized) && !path.posix.isAbsolute(normalized) && !path.win32.isAbsolute(normalized)
+    && !normalized.split('/').some(part => !part || part === '.' || part === '..');
+}
+
 function looksBinary(bytes) {
   const count = Math.min(bytes.length, 4096);
   if (!count) return false;
@@ -56,4 +62,4 @@ function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-module.exports = { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, looksBinary, sha256 };
+module.exports = { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256 };

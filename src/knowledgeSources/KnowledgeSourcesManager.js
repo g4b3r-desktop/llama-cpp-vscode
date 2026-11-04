@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { getConfig } = require('../config');
 const { parseDocument } = require('./KnowledgeDocumentParser');
 const { tokenize } = require('../workspaceIndex');
-const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, looksBinary, sha256 } = require('./sourceUtils');
+const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256 } = require('./sourceUtils');
 
 const INDEX_VERSION = 1;
 const INCLUDE_GLOB = '**/*.{html,htm,md,mdx,txt,json,jsonc,js,jsx,mjs,cjs,ts,tsx,py,java,c,cc,cpp,h,hpp,cs,go,rs,php,rb,swift,kt,kts,scala,sh,bash,zsh,lua,vue,svelte,css,scss,less,xml,yaml,yml,sql,graphql,gql,proto}';
@@ -124,11 +124,20 @@ class KnowledgeSourcesManager {
     try {
       const raw = JSON.parse(new TextDecoder().decode(await vscode.workspace.fs.readFile(uri)));
       if (raw?.version !== INDEX_VERSION || raw.sourceId !== source.id || raw.rootUri !== source.rootUri || !raw.documents || typeof raw.documents !== 'object') return false;
-      const documents = raw.documents;
+      const documents = Object.create(null);
       let chunks = [];
-      for (const [filename, document] of Object.entries(documents)) {
-        if (!document || typeof document.hash !== 'string' || !Array.isArray(document.chunks)) continue;
-        for (const chunk of document.chunks) chunks.push(this.toSearchChunk(source, filename, chunk, document.hash));
+      for (const [filename, document] of Object.entries(raw.documents)) {
+        if (!isSafeDocumentPath(filename) || isSensitiveFilename(filename)) continue;
+        if (!document || !/^[a-f0-9]{64}$/i.test(document.hash || '') || !Array.isArray(document.chunks)) continue;
+        const safeChunks = document.chunks.filter(chunk => chunk && typeof chunk.text === 'string').map(chunk => ({
+          ...chunk,
+          vector: Array.isArray(chunk.vector) && chunk.vector.length && chunk.vector.every(value => typeof value === 'number' && Number.isFinite(value))
+            ? chunk.vector
+            : undefined
+        }));
+        const safeDocument = { hash: document.hash, size: Number(document.size || 0), mtime: Number(document.mtime || 0), chunks: safeChunks };
+        documents[filename] = safeDocument;
+        for (const chunk of safeChunks) chunks.push(this.toSearchChunk(source, filename, chunk, safeDocument.hash));
       }
       const currentFingerprint = embeddingFingerprint();
       const vectors = chunks.filter(chunk => chunk.vector?.length);
@@ -667,4 +676,4 @@ function parserFingerprint() {
   const options = getConfig().rag.knowledgeSources;
   return [INDEX_VERSION, options.chunkLines, options.chunkOverlapLines, options.chunkCharacters, options.chunkOverlapCharacters].join('|');
 }
-module.exports = { KnowledgeSourcesManager, embeddingFingerprint, parserFingerprint, INCLUDE_GLOB, EXCLUDE_GLOB };
+module.exports = { KnowledgeSourcesManager, embeddingFingerprint, parserFingerprint, isSafeDocumentPath, INCLUDE_GLOB, EXCLUDE_GLOB };
