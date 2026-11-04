@@ -62,4 +62,59 @@ function sha256(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-module.exports = { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256 };
+
+const DEFAULT_SOURCE_EXTENSIONS = Object.freeze([
+  'html','htm','md','mdx','txt','json','jsonc','js','jsx','mjs','cjs','ts','tsx',
+  'py','java','c','cc','cpp','h','hpp','cs','go','rs','php','rb','swift','kt',
+  'kts','scala','sh','bash','zsh','lua','vue','svelte','css','scss','less','xml',
+  'yaml','yml','sql','graphql','gql','proto'
+]);
+
+function normalizeSourceExtensions(values) {
+  const items = Array.isArray(values) ? values : String(values || '').split(',');
+  const normalized = [...new Set(items.map(value => String(value || '').trim().replace(/^\.+/, '').toLowerCase()).filter(Boolean))];
+  if (!normalized.length) return [...DEFAULT_SOURCE_EXTENSIONS];
+  const allowed = new Set(DEFAULT_SOURCE_EXTENSIONS);
+  const invalid = normalized.filter(value => !/^[a-z0-9]{1,10}$/.test(value) || !allowed.has(value));
+  if (invalid.length) throw new Error('Unsupported document extension(s): ' + invalid.join(', '));
+  return normalized;
+}
+
+function normalizeSourceDirectories(values) {
+  const items = Array.isArray(values) ? values : String(values || '').split(',');
+  const normalized = [...new Set(items.map(value => String(value || '').trim().replace(/\\\\/g, '/').replace(/^\.\\//, '').replace(/\\/+$/, '')).filter(Boolean))];
+  for (const directory of normalized) {
+    if (path.posix.isAbsolute(directory) || path.win32.isAbsolute(directory)
+      || directory.split('/').some(segment => !segment || segment === '.' || segment === '..')
+      || !directory.split('/').every(segment => /^[\\p{L}\\p{N}._ -]+$/u.test(segment))
+      || directory.length > 200) {
+      throw new Error('Invalid include directory: ' + directory);
+    }
+  }
+  return normalized;
+}
+
+function buildSourceIncludeGlob(source) {
+  const extensions = normalizeSourceExtensions(source.extensions);
+  const directories = normalizeSourceDirectories(source.includeDirectories || []);
+  const prefix = directories.length ? '**/{' + directories.join(',') + '}/**/*' : '**/*';
+  return prefix + '.{' + extensions.join(',') + '}';
+}
+
+function sourceFiltersFingerprint(source) {
+  const value = JSON.stringify({
+    includeDirectories: normalizeSourceDirectories(source.includeDirectories || []).slice().sort(),
+    extensions: normalizeSourceExtensions(source.extensions).slice().sort()
+  });
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function matchesSourceFilter(filename, source) {
+  const normalized = normalizeRelative(filename);
+  const extension = path.posix.extname(normalized).slice(1).toLowerCase();
+  if (!normalizeSourceExtensions(source.extensions).includes(extension)) return false;
+  const directories = normalizeSourceDirectories(source.includeDirectories || []);
+  return !directories.length || directories.some(directory => normalized.startsWith(directory + '/'));
+}
+
+module.exports = { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter };
