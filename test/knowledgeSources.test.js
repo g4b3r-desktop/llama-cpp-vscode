@@ -6,6 +6,7 @@ const { parseDocument, htmlToStructuredText, chunkParagraphs } = require('../src
 const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile, sourceFiltersFingerprint, normalizeSourceTags, matchesRetrievalScope } = require('../src/knowledgeSources/sourceUtils');
 const { runEmbeddingBatches } = require('../src/knowledgeSources/embeddingQueue');
 const { reciprocalRankFusion, diversifyResults } = require('../src/knowledgeSources/retrievalUtils');
+const { elapsedMs, logRagMetrics } = require('../src/ragMetrics');
 
 test('HTML extraction removes executable/layout noise and preserves headings and links', () => {
   const html = '<html><head><title>Three.js API</title><style>.hidden{}</style></head><body><nav>Navigation</nav><main><h1>Loading</h1><h2>GLTFLoader</h2><p>Use <a href="../api/GLTFLoader.html">GLTFLoader</a> to load assets.</p><script>alert(1)</script></main></body></html>';
@@ -152,6 +153,18 @@ test('per-source file selection is normalized, exact and included in the filter 
     sourceFiltersFingerprint({ includeDirectories: [], extensions: ['md'], selectedFiles: ['docs/a.md'] }),
     sourceFiltersFingerprint({ includeDirectories: [], extensions: ['md'], selectedFiles: ['docs/b.md'] })
   );
+});
+
+test('RAG metrics format stage timings and structured details', () => {
+  const lines = [];
+  const payload = logRagMetrics({ appendLine: line => lines.push(line) }, 'search', { bm25: 12.345, rerank: 0, total: 15 }, { results: 4 });
+  assert.equal(payload.operation, 'search');
+  assert.equal(payload.timings_ms.bm25, 12.35);
+  assert.equal(payload.timings_ms.rerank, 0);
+  assert.match(lines[0], /^\\[rag:metrics\\] /);
+  assert.match(lines[0], /\"results\":4/);
+  const started = Date.now() - 25;
+  assert.ok(elapsedMs(started) >= 20);
 });
 
 test('retrieval scope filters by directory, source tags and recent modification time', () => {
