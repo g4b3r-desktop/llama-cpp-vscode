@@ -123,6 +123,36 @@ function matchesSelectedFile(filename, source) {
   return selected === null || selected === undefined || (Array.isArray(selected) && selected.includes(normalizeRelative(filename)));
 }
 
+function normalizeSourceTags(values) {
+  if (values == null) return [];
+  const list = Array.isArray(values) ? values : String(values).split(',');
+  return [...new Set(list.map(value => String(value || '').trim().toLowerCase())
+    .filter(value => /^[a-z0-9][a-z0-9_-]{0,31}$/.test(value)))].sort();
+}
+
+function matchesRetrievalScope(chunk, options = {}) {
+  const directories = Array.isArray(options.directories) ? options.directories : [];
+  if (directories.length) {
+    const filename = normalizeRelative(chunk.filename || '').toLowerCase();
+    const matches = directories.some(value => {
+      const directory = normalizeRelative(value).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '').toLowerCase();
+      return directory && !directory.startsWith('../') && (filename === directory || filename.startsWith(directory + '/'));
+    });
+    if (!matches) return false;
+  }
+  const tags = normalizeSourceTags(options.tags);
+  if (tags.length) {
+    const chunkTags = new Set(normalizeSourceTags(chunk.tags));
+    if (!tags.some(tag => chunkTags.has(tag))) return false;
+  }
+  const recentDays = Number(options.recentDays);
+  if (Number.isFinite(recentDays) && recentDays > 0) {
+    const modified = Number(chunk.mtimeMs || 0);
+    if (!modified || Date.now() - modified > recentDays * 86400000) return false;
+  }
+  return true;
+}
+
 function sourceFiltersFingerprint(source) {
   const value = JSON.stringify({
     includeDirectories: normalizeSourceDirectories(source.includeDirectories || []).slice().sort(),
@@ -146,5 +176,5 @@ module.exports = {
   isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative,
   isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS,
   normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob,
-  sourceFiltersFingerprint, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile
+  sourceFiltersFingerprint, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile, normalizeSourceTags, matchesRetrievalScope
 };
