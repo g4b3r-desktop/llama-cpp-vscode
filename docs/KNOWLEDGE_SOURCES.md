@@ -54,11 +54,17 @@ A alteração da configuração de chunking invalida o parser fingerprint e prov
 
 Cada fonte possui o botão **Pastas e tipos**. Informe diretórios relativos separados por vírgula (por exemplo, `docs, manual`); vazio inclui todas as pastas. Em seguida, marque em uma lista as extensões que devem ser indexadas (por exemplo, `.html`, `.md`, `.js`, `.ts`). A lista contém somente os formatos textuais suportados pela extensão e permite selecionar vários tipos ao mesmo tempo. Essa configuração é independente para cada Knowledge Source e é aplicada na descoberta de arquivos, indexação e watcher. Se os tipos forem alterados, a seleção individual de arquivos é mantida somente para os caminhos que continuam compatíveis.
 
+O botão **Tags** permite associar rótulos à fonte (por exemplo, `threejs`, `api`, `loaders`). A ferramenta `search_knowledge_base` aceita `source_ids`, `directories`, `tags` e `recent_days` para restringir cada consulta antes do ranking BM25/vetorial. Diretórios são prefixos relativos do caminho do arquivo; tags usam correspondência OR; `recent_days` considera a data de modificação do arquivo.
+
+O botão **Rerank** habilita ou desabilita reranking por fonte, sem alterar a política do Workspace RAG. Quando ativo, os candidatos daquela documentação são reranqueados usando o endpoint configurado em `llamaCpp.rag.rerank.baseUrl`/`model`. Se o endpoint não estiver disponível, a busca mantém os resultados BM25/vetoriais.
+
 O botão **Arquivos** abre a lista de documentos encontrados dentro desses filtros. Selecione individualmente os arquivos que poderão alimentar o RAG. A seleção é persistida por fonte; arquivos não selecionados são removidos do índice ativo e não entram na recuperação. Para voltar a usar todos os arquivos compatíveis, marque **Todos os arquivos compatíveis** na lista. A seleção também limita a preservação de documentos durante reindexações parciais.
 
 A interface mostra a fase atual, arquivos lidos, embeddings concluídos, lotes e concorrência. A concorrência é limitada a 4 pelo código e deve ser aumentada gradualmente; em GPUs com pouca VRAM, mantenha 1.
 
-A estratégia BM25/vector/hybrid, embeddings, reranking e Context Budget Manager continuam sendo os controles compartilhados de llamaCpp.rag.
+O cache incremental identifica chunks pelo hash do texto efetivamente enviado ao modelo de embeddings, incluindo contexto de fonte/arquivo/seção e fingerprint do modelo. Quando um documento muda, chunks idênticos reutilizam seus vetores e somente os chunks novos ou alterados são re-embedados. O formato JSON/JSONL existente permanece compatível; documentos antigos recebem o hash de chunk durante a leitura e continuam válidos.
+
+A estratégia BM25/vector/hybrid e o Context Budget Manager continuam compartilhados. O reranking do Workspace RAG permanece controlado por `llamaCpp.rag.rerank.enabled`; a opção individual das Knowledge Sources não ativa reranking para o workspace.
 
 ## Segurança e limitações
 
