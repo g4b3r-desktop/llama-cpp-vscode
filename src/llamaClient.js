@@ -275,9 +275,9 @@ class LlamaClient {
     return vectors;
   }
 
-  async rerank(query, documents, signal) {
+  async rerank(query, documents, signal, options = {}) {
     const config = getConfig();
-    if (!config.rag.rerank.enabled || !documents.length) return undefined;
+    if (!(config.rag.rerank.enabled || options.force) || !documents.length) return undefined;
     const customBase = String(config.rag.rerank.baseUrl || '').trim();
     if (!customBase && config.provider === 'openai') return undefined;
     if (!customBase) await this.ensureReady();
