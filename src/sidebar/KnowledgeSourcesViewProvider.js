@@ -124,6 +124,20 @@ class KnowledgeSourcesViewProvider {
         this.post({ type: 'notice', text: 'Filtros salvos. Reindexando somente os arquivos incluídos…' });
         await this.manager.reindexSource(message.id, true);
         await this.postState();
+      } else if (message?.type === 'tags' && typeof message.id === 'string') {
+        const source = (await this.manager.listSources()).find(item => item.id === message.id);
+        if (!source) return;
+        const value = await vscode.window.showInputBox({ title: 'Tags da Knowledge Source', prompt: 'Informe tags separadas por vírgula. Ex.: threejs, api, loaders', value: (source.tags || []).join(', '), ignoreFocusOut: true });
+        if (value === undefined) return;
+        await this.manager.configureTags(message.id, value);
+        this.post({ type: 'notice', text: 'Tags salvas para esta fonte.' });
+        await this.postState();
+      } else if (message?.type === 'rerank' && typeof message.id === 'string') {
+        const source = (await this.manager.listSources()).find(item => item.id === message.id);
+        if (!source) return;
+        await this.manager.setRerankEnabled(message.id, source.rerankEnabled === false);
+        this.post({ type: 'notice', text: 'Reranking da fonte ' + (source.rerankEnabled === false ? 'ativado' : 'desativado') + '.' });
+        await this.postState();
       } else if (message?.type === 'files' && typeof message.id === 'string') {
         const source = (await this.manager.listSources()).find(item => item.id === message.id);
         if (!source) return;
