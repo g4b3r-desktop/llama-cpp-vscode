@@ -180,7 +180,10 @@ class KnowledgeSourcesManager {
       if (error.code !== 'ENOENT') this.output?.appendLine('[knowledge-sources] checkpoint read failed for ' + source.name + ': ' + error.message);
       return 0;
     }
-    const lines = content.split(/\\r?\\n/);
+    // Ignore a trailing partial JSONL record left by a process crash; all earlier newline-terminated records remain reusable.
+    const lastNewline = content.lastIndexOf('\\n');
+    const completeContent = lastNewline >= 0 ? content.slice(0, lastNewline) : '';
+    const lines = completeContent.split(/\\r?\\n/);
     let header;
     try { header = JSON.parse(lines.shift() || ''); } catch { header = null; }
     const expected = this.checkpointHeader(source);
