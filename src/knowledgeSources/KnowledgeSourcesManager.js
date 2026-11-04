@@ -573,6 +573,8 @@ class KnowledgeSourcesManager {
       if (pending.length) {
         try {
           const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
+          const checkpointQueue = [];
+          await this.ensureEmbeddingCheckpoint(source);
           await runEmbeddingBatches(pending, {
             batchSize,
             concurrency,
@@ -593,12 +595,16 @@ class KnowledgeSourcesManager {
                 }
                 const document = nextDocuments[batch[index].filename];
                 const target = document?.chunks?.find(item => item.id === batch[index].id);
-                if (target) target.vector = vector;
+                if (target) {
+                  target.vector = vector;
+                  checkpointQueue.push({ id: target.id, vector });
+                }
                 if (!source.embeddingDimension) source.embeddingDimension = vector.length;
               }
             },
             onWaveComplete: async batchProgress => {
-              // Checkpoint every completed wave, including successful batches from a partially failed wave.
+              // Append only the completed vectors; do not rewrite the full multi-megabyte index per batch.
+              await this.appendEmbeddingCheckpoint(source, checkpointQueue.splice(0));
               chunks = this.flattenDocuments(source, nextDocuments);
               this.indexes.set(source.id, chunks);
               source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
@@ -612,13 +618,13 @@ class KnowledgeSourcesManager {
                 batchesTotal: batchProgress.totalBatches,
                 concurrency: batchProgress.concurrency
               };
-              await this.saveIndex(source);
-              await this.persistCatalog();
-              this.emitChanged();
-              progress?.report({
-                message: 'Embeddings ' + source.vectors + '/' + chunks.length +
-                  ' · lotes ' + batchProgress.completedBatches + '/' + batchProgress.totalBatches
-              });
+              if (batchProgress.completedBatches % 4 === 0 || batchProgress.completedBatches === batchProgress.totalBatches) {
+                this.emitChanged();
+                progress?.report({
+                  message: 'Embeddings ' + source.vectors + '/' + chunks.length +
+                    ' · lotes ' + batchProgress.completedBatches + '/' + batchProgress.totalBatches
+                });
+              }
             }
           });
         } catch (error) {
