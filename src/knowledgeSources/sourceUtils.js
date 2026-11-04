@@ -101,7 +101,7 @@ function normalizeSourceDirectories(values) {
 function buildSourceIncludeGlob(source) {
   const extensions = normalizeSourceExtensions(source.extensions);
   const directories = normalizeSourceDirectories(source.includeDirectories || []);
-  const directoryPattern = directories.length === 1 ? '**/' + directories[0] + '/**/*' : directories.length ? '**/{' + directories.join(',') + '}/**/*' : '**/*';
+  const directoryPattern = directories.length === 1 ? directories[0] + '/**/*' : directories.length ? '{' + directories.join(',') + '}/**/*' : '**/*';
   const prefix = directoryPattern;
   return prefix + '.{' + extensions.join(',') + '}';
 }
@@ -121,10 +121,7 @@ function matchesSourceFilter(filename, source) {
   const directories = normalizeSourceDirectories(source.includeDirectories || []);
   if (!directories.length) return true;
   const segments = normalized.split('/');
-  return directories.some(directory => {
-    const parts = directory.split('/');
-    return segments.slice(0, -1).some((_, index) => segments.slice(index, index + parts.length).join('/') === directory);
-  });
+  return directories.some(directory => normalized.startsWith(directory + '/'));
 }
 
 module.exports = {
