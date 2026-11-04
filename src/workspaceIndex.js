@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const { getConfig } = require('./config');
 const { reciprocalRankFusion, diversifyResults } = require('./knowledgeSources/retrievalUtils');
+const { elapsedMs, logRagMetrics } = require('./ragMetrics');
 
 class WorkspaceIndex {
   constructor(client, output, storageUri, knowledgeSources) {
@@ -24,15 +25,21 @@ class WorkspaceIndex {
     if (!vscode.workspace.isTrusted) throw new Error('Workspace RAG requires a trusted VS Code workspace.');
     if (this.indexing) return this.indexing;
     const run = async progress => {
+      const operationStartedAt = Date.now();
+      const timings = { indexing: 0, embedding: 0, persistence: 0 };
+      const indexingStartedAt = Date.now();
       const uris = await vscode.workspace.findFiles(c.rag.includeGlob,c.rag.excludeGlob||undefined,c.rag.maxFiles);
       const chunks=[]; let i=0;
       for (const uri of uris) { i++; if(i%25===0) progress?.report({message:`Indexing ${i}/${uris.length} files…`}); chunks.push(...await this.readAndChunk(uri,c)); }
+      timings.indexing = elapsedMs(indexingStartedAt);
       this.chunks=chunks; this.vectorError=undefined;
       if (c.rag.embedding.enabled && c.rag.strategy!=='bm25' && chunks.length) {
-        try { await this.embedChunks(chunks,c,progress); } catch(e) { this.vectorError=e instanceof Error?e.message:String(e); this.output.appendLine(`[rag] embeddings unavailable, BM25 fallback active: ${this.vectorError}`); }
+        try { await this.embedChunks(chunks,c,progress,timings); } catch(e) { this.vectorError=e instanceof Error?e.message:String(e); this.output.appendLine(`[rag] embeddings unavailable, BM25 fallback active: ${this.vectorError}`); }
       }
-      this.indexed=true; this.indexedAt=new Date(); await this.saveCache();
+      this.indexed=true; this.indexedAt=new Date();
+      const persistenceStartedAt=Date.now(); await this.saveCache(); timings.persistence=elapsedMs(persistenceStartedAt);
       const result={files:new Set(chunks.map(x=>x.filename)).size,chunks:chunks.length,vectors:chunks.filter(x=>x.vector?.length).length};
+      logRagMetrics(this.output,'workspace_index',{...timings,total:elapsedMs(operationStartedAt)},{...result,status:this.vectorError?'partial':'success'});
       this.output.appendLine(`[rag] Indexed ${result.files} files / ${result.chunks} chunks / ${result.vectors} vectors.`); return result;
     };
     this.indexing=showProgress?vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'llama.cpp: indexing workspace',cancellable:false},run):run();
@@ -48,36 +55,51 @@ class WorkspaceIndex {
       return out;
     } catch { return []; }
   }
-  async embedChunks(chunks,c,progress) {
+  async embedChunks(chunks,c,progress,timings={}) {
     const batch=Math.max(1,c.rag.embedding.batchSize);
-    for(let i=0;i<chunks.length;i+=batch){ const slice=chunks.slice(i,i+batch), inputs=slice.map(x=>`file: ${x.filename}\nlines: ${x.startLine}-${x.endLine}\n${x.text}`.slice(0,c.rag.embedding.maxCharacters)); const vectors=await this.client.embed(inputs); vectors.forEach((v,j)=>slice[j].vector=v); progress?.report({message:`Embedding ${Math.min(i+slice.length,chunks.length)}/${chunks.length} chunks…`}); }
+    for(let i=0;i<chunks.length;i+=batch){ const slice=chunks.slice(i,i+batch), inputs=slice.map(x=>`file: ${x.filename}\nlines: ${x.startLine}-${x.endLine}\n${x.text}`.slice(0,c.rag.embedding.maxCharacters)); const startedAt=Date.now(); try { const vectors=await this.client.embed(inputs); vectors.forEach((v,j)=>slice[j].vector=v); } finally { timings.embedding=(timings.embedding||0)+elapsedMs(startedAt); } progress?.report({message:`Embedding ${Math.min(i+slice.length,chunks.length)}/${chunks.length} chunks…`}); }
   }
   async search(query, options = {}) {
     const config = getConfig();
+    const searchStartedAt = Date.now();
+    const timings = { knowledge_sources: 0, bm25: 0, query_embedding: 0, vector_rank: 0, rerank: 0 };
     if (!config.rag.enabled || !String(query).trim()) return [];
     await this.ensureIndexed();
     const workspaceChunks = options.includeWorkspace === false ? [] : this.chunks;
     let sourceChunks = [];
     if (this.knowledgeSources && options.includeKnowledgeSources !== false) {
+      const sourceStartedAt = Date.now();
       try {
         sourceChunks = await this.knowledgeSources.getChunks({ sourceIds: options.sourceIds, directories: options.directories, tags: options.tags, recentDays: options.recentDays, signal: options.signal });
       } catch (error) {
         this.output?.appendLine('[rag] Knowledge Sources unavailable; continuing with workspace results: ' + (error instanceof Error ? error.message : String(error)));
+      } finally {
+        timings.knowledge_sources = elapsedMs(sourceStartedAt);
       }
     }
     const pool = [...workspaceChunks, ...sourceChunks];
-    if (!pool.length) return [];
+    if (!pool.length) {
+      logRagMetrics(this.output,'search',{...timings,total:elapsedMs(searchStartedAt)},{pool:0,results:0});
+      return [];
+    }
 
     const exclude = options.excludeUri?.toString() || '';
     const topK = Math.max(1, options.topK || config.rag.topK);
     const candidates = Math.min(pool.length, Math.max(topK * 5, config.rag.rerank.candidates || topK));
+    const bm25StartedAt = Date.now();
     const bm25 = this.rankBm25(query, candidates, exclude, pool);
+    timings.bm25 = elapsedMs(bm25StartedAt);
     let vector = [];
     if (config.rag.strategy !== 'bm25' && pool.some(chunk => chunk.vector?.length)) {
+      const embeddingStartedAt = Date.now();
       try {
         const [queryVector] = await this.client.embed([String(query).slice(-12000)], options.signal);
+        timings.query_embedding = elapsedMs(embeddingStartedAt);
+        const vectorStartedAt = Date.now();
         vector = this.rankVector(queryVector, candidates, exclude, pool);
+        timings.vector_rank = elapsedMs(vectorStartedAt);
       } catch (error) {
+        timings.query_embedding = elapsedMs(embeddingStartedAt);
         this.vectorError = error instanceof Error ? error.message : String(error);
       }
     }
@@ -94,6 +116,7 @@ class WorkspaceIndex {
         ? merged.filter(chunk => chunk.sourceId && chunk.rerankEnabled !== false).slice(0, Math.max(1, config.rag.rerank.candidates || topK))
         : merged.slice(0, Math.min(config.rag.rerank.candidates, merged.length));
       if (subset.length > 1) {
+        const rerankStartedAt = Date.now();
         try {
           const ranks = await this.client.rerank(query, subset.map(chunk => chunk.text), options.signal, { force: sourceOnly });
           if (ranks?.length) {
@@ -107,10 +130,14 @@ class WorkspaceIndex {
           }
         } catch (error) {
           this.output.appendLine(`[rag] rerank fallback: ${error.message || error}`);
+        } finally {
+          timings.rerank += elapsedMs(rerankStartedAt);
         }
       }
     }
-    return diversifyResults(merged, topK);
+    const results = diversifyResults(merged, topK);
+    logRagMetrics(this.output,'search',{...timings,total:elapsedMs(searchStartedAt)},{pool:pool.length,workspace_chunks:workspaceChunks.length,knowledge_source_chunks:sourceChunks.length,candidates,results:results.length,strategy:config.rag.strategy});
+    return results;
   }
   rankBm25(query, limit, exclude, chunks = this.chunks) {
     const terms = [...new Set(tokenize(query))];
