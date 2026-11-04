@@ -114,7 +114,7 @@
       label.textContent = source.enabled ? 'Ativa' : 'Desativada';
       enabledLabel.append(checkbox, label);
       controls.append(enabledLabel);
-      const filtersButton = makeButton('Filtros', 'filters', source.id, true);
+      const filtersButton = makeButton('Pastas e tipos', 'filters', source.id, true);
       const filesButton = makeButton('Arquivos (' + (source.selectedFileCount === null ? 'todos' : source.selectedFileCount) + ')', 'files', source.id, true);
       const reindex = makeButton(source.indexing ? 'Indexando…' : 'Reindexar', 'reindex', source.id, true);
       reindex.disabled = Boolean(source.indexing || source.status === 'indexing');
