@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const { parseDocument, htmlToStructuredText, chunkParagraphs } = require('../src/knowledgeSources/KnowledgeDocumentParser');
-const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile, sourceFiltersFingerprint } = require('../src/knowledgeSources/sourceUtils');
+const { isBlockedRoot, isSensitiveFilename, isInside, isSafeDocumentPath, looksBinary, isValidSourceId, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile, sourceFiltersFingerprint, normalizeSourceTags, matchesRetrievalScope } = require('../src/knowledgeSources/sourceUtils');
 const { runEmbeddingBatches } = require('../src/knowledgeSources/embeddingQueue');
 const { reciprocalRankFusion, diversifyResults } = require('../src/knowledgeSources/retrievalUtils');
 
@@ -152,6 +152,18 @@ test('per-source file selection is normalized, exact and included in the filter 
     sourceFiltersFingerprint({ includeDirectories: [], extensions: ['md'], selectedFiles: ['docs/a.md'] }),
     sourceFiltersFingerprint({ includeDirectories: [], extensions: ['md'], selectedFiles: ['docs/b.md'] })
   );
+});
+
+test('retrieval scope filters by directory, source tags and recent modification time', () => {
+  const now = Date.now();
+  const chunk = { filename: 'docs/api/loader.md', tags: ['threejs', 'api'], mtimeMs: now - 2 * 86400000 };
+  assert.deepEqual(normalizeSourceTags([' ThreeJS ', 'api', 'api', '../bad']), ['api', 'threejs']);
+  assert.equal(matchesRetrievalScope(chunk, { directories: ['docs/api'] }), true);
+  assert.equal(matchesRetrievalScope(chunk, { directories: ['src'] }), false);
+  assert.equal(matchesRetrievalScope(chunk, { tags: ['api'] }), true);
+  assert.equal(matchesRetrievalScope(chunk, { tags: ['python'] }), false);
+  assert.equal(matchesRetrievalScope(chunk, { recentDays: 7 }), true);
+  assert.equal(matchesRetrievalScope(chunk, { recentDays: 1 }), false);
 });
 
 test('embedding queue respects configured concurrency and checkpoints each completed wave', async () => {
