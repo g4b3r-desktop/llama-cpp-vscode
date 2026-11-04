@@ -279,6 +279,9 @@ class LlamaClient {
     const config = getConfig();
     if (!(config.rag.rerank.enabled || options.force) || !documents.length) return undefined;
     const customBase = String(config.rag.rerank.baseUrl || '').trim();
+    // Per-source Knowledge Source reranking must use an explicitly configured reranker endpoint;
+    // never send rerank requests to the main chat/inference server by accident.
+    if (options.force && !customBase) return undefined;
     if (!customBase && config.provider === 'openai') return undefined;
     if (!customBase) await this.ensureReady();
     const base = customBase || configuredBaseUrl(config);
