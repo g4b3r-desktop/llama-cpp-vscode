@@ -78,6 +78,28 @@
       updated.className = 'source-updated';
       updated.textContent = 'Última indexação: ' + formatDate(source.lastIndexedAt);
 
+      const filters = document.createElement('p');
+      filters.className = 'source-filters';
+      const directories = Array.isArray(source.includeDirectories) && source.includeDirectories.length
+        ? source.includeDirectories.join(', ')
+        : 'todas as pastas';
+      const extensions = Array.isArray(source.extensions) ? source.extensions.join(', ') : '';
+      filters.textContent = 'Pastas: ' + directories + ' · Extensões: ' + extensions;
+
+      let progress = null;
+      if (source.indexing && source.progress) {
+        progress = document.createElement('p');
+        progress.className = 'source-progress';
+        const value = source.progress;
+        if (value.phase === 'scan') {
+          progress.textContent = 'Leitura: ' + Number(value.current || 0) + '/' + Number(value.total || 0) + ' arquivos';
+        } else {
+          progress.textContent = 'Embeddings: ' + Number(value.current || 0) + '/' + Number(value.total || 0) +
+            ' · lotes: ' + Number(value.batchesCompleted || 0) + '/' + Number(value.batchesTotal || 0) +
+            ' · concorrência: ' + Number(value.concurrency || 1);
+        }
+      }
+
       const controls = document.createElement('div');
       controls.className = 'source-controls';
       const enabledLabel = document.createElement('label');
@@ -91,12 +113,16 @@
       label.textContent = source.enabled ? 'Ativa' : 'Desativada';
       enabledLabel.append(checkbox, label);
       controls.append(enabledLabel);
+      const filtersButton = makeButton('Filtros', 'filters', source.id, true);
       const reindex = makeButton(source.indexing ? 'Indexando…' : 'Reindexar', 'reindex', source.id, true);
       reindex.disabled = Boolean(source.indexing || source.status === 'indexing');
+      filtersButton.disabled = Boolean(source.indexing || source.status === 'indexing');
       const remove = makeButton('Remover', 'remove', source.id, true);
-      controls.append(reindex, remove);
+      controls.append(filtersButton, reindex, remove);
 
-      card.append(heading, root, stats, updated, controls);
+      card.append(heading, root, stats, updated, filters);
+      if (progress) card.appendChild(progress);
+      card.appendChild(controls);
       if (Array.isArray(source.documents) && source.documents.length) {
         const details = document.createElement('details');
         details.className = 'source-documents';
