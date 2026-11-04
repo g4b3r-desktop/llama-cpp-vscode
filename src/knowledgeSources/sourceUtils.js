@@ -119,8 +119,8 @@ function normalizeSelectedFiles(values) {
 }
 
 function matchesSelectedFile(filename, source) {
-  const selected = normalizeSelectedFiles(source.selectedFiles);
-  return selected === null || selected.includes(normalizeRelative(filename));
+  const selected = source.selectedFiles;
+  return selected === null || selected === undefined || (Array.isArray(selected) && selected.includes(normalizeRelative(filename)));
 }
 
 function sourceFiltersFingerprint(source) {
