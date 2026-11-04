@@ -25,6 +25,7 @@ class KnowledgeSourcesManager {
     this.pendingRefresh = new Set();
     this.indexing = new Map();
     this.embeddingRefresh = new Map();
+    this.embeddingRefreshControllers = new Map();
     this.checkpointReady = new Set();
     this.controllers = new Map();
     this.catalogWrite = Promise.resolve();
@@ -375,6 +376,8 @@ class KnowledgeSourcesManager {
     } else {
       source.enabled = false;
       this.disposeWatcher(source.id);
+      this.controllers.get(source.id)?.abort();
+      this.embeddingRefreshControllers.get(source.id)?.abort();
     }
     source.updatedAt = new Date().toISOString();
     await this.persistCatalog();
@@ -387,6 +390,7 @@ class KnowledgeSourcesManager {
     const source = this.requireSource(sourceId);
     source.includeDirectories = normalizeSourceDirectories(options.includeDirectories || []);
     source.extensions = normalizeSourceExtensions(options.extensions || []);
+    await this.clearEmbeddingCheckpoint(source.id);
     source.needsFilterRefresh = true;
     source.status = 'stale';
     source.error = null;
@@ -402,14 +406,18 @@ class KnowledgeSourcesManager {
     await this.ready;
     const source = this.requireSource(sourceId);
     this.controllers.get(sourceId)?.abort();
+    this.embeddingRefreshControllers.get(sourceId)?.abort();
     this.disposeWatcher(sourceId);
     const active = this.indexing.get(sourceId);
     if (active) await active.catch(() => {});
+    const activeEmbeddingRefresh = this.embeddingRefresh.get(sourceId);
+    if (activeEmbeddingRefresh) await activeEmbeddingRefresh.catch(() => {});
     this.sources.delete(sourceId);
     this.indexes.delete(sourceId);
     this.documents.delete(sourceId);
     const cache = this.cacheUri(sourceId);
     if (cache) await vscode.workspace.fs.delete(cache, { useTrash: false }).catch(() => {});
+    await this.clearEmbeddingCheckpoint(sourceId);
     await this.persistCatalog();
     this.emitChanged();
     return { removed: sourceId };
@@ -691,6 +699,7 @@ class KnowledgeSourcesManager {
       const cachedChunks = this.indexes.get(source.id) || [];
       const hasCachedIndex = cachedChunks.length > 0;
       const isStale = source.status !== 'indexed' || source.needsRechunk || source.needsFilterRefresh;
+      let indexingInBackground = false;
       if (isStale && config.rag.knowledgeSources.autoIndex) {
         if (!hasCachedIndex || source.needsFilterRefresh) {
           // No usable cache (or filters changed): do not answer from an index that violates the configured scope.
@@ -701,6 +710,7 @@ class KnowledgeSourcesManager {
           }
         } else if (!this.indexing.has(source.id)) {
           // Use the persisted index immediately; validate/update it in the background instead of blocking Chat.
+          indexingInBackground = true;
           void this.reindexSource(source.id, false).catch(error => {
             this.output?.appendLine('[knowledge-sources] background index refresh failed for ' + source.name + ': ' + error.message);
           });
@@ -708,8 +718,11 @@ class KnowledgeSourcesManager {
       }
       if (source.needsFilterRefresh && !config.rag.knowledgeSources.autoIndex) continue;
 
-      if (source.needsEmbedding && config.rag.knowledgeSources.autoIndex && !this.embeddingRefresh.has(source.id)) {
-        const task = this.refreshCachedEmbeddings(source, undefined)
+      if (source.needsEmbedding && config.rag.knowledgeSources.autoIndex
+        && !indexingInBackground && !this.indexing.has(source.id) && !this.embeddingRefresh.has(source.id)) {
+        const refreshController = new AbortController();
+        this.embeddingRefreshControllers.set(source.id, refreshController);
+        const task = this.refreshCachedEmbeddings(source, refreshController.signal)
           .catch(error => {
             source.needsEmbedding = false;
             source.progress = { ...(source.progress || {}), phase: 'paused' };
@@ -719,6 +732,7 @@ class KnowledgeSourcesManager {
           })
           .finally(() => {
             this.embeddingRefresh.delete(source.id);
+            this.embeddingRefreshControllers.delete(source.id);
             this.emitChanged();
           });
         this.embeddingRefresh.set(source.id, task);
@@ -967,6 +981,7 @@ class KnowledgeSourcesManager {
   dispose() {
     for (const sourceId of [...this.watchers.keys()]) this.disposeWatcher(sourceId);
     for (const controller of this.controllers.values()) controller.abort();
+    for (const controller of this.embeddingRefreshControllers.values()) controller.abort();
     this.emitter.dispose();
   }
 }
