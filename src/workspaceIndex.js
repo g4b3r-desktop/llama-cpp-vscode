@@ -60,7 +60,7 @@ class WorkspaceIndex {
     let sourceChunks = [];
     if (this.knowledgeSources && options.includeKnowledgeSources !== false) {
       try {
-        sourceChunks = await this.knowledgeSources.getChunks({ sourceIds: options.sourceIds, signal: options.signal });
+        sourceChunks = await this.knowledgeSources.getChunks({ sourceIds: options.sourceIds, directories: options.directories, tags: options.tags, recentDays: options.recentDays, signal: options.signal });
       } catch (error) {
         this.output?.appendLine('[rag] Knowledge Sources unavailable; continuing with workspace results: ' + (error instanceof Error ? error.message : String(error)));
       }
@@ -88,18 +88,26 @@ class WorkspaceIndex {
     else if (vector.length && bm25.length) merged = rrf(bm25, vector, candidates);
     else merged = vector.length ? vector : bm25;
 
-    if (config.rag.rerank.enabled && merged.length > 1) {
-      try {
-        const subset = merged.slice(0, Math.min(config.rag.rerank.candidates, merged.length));
-        const ranks = await this.client.rerank(query, subset.map(chunk => chunk.text), options.signal);
-        if (ranks?.length) {
-          const scores = new Map(ranks.map(item => [item.index, item.score]));
-          subset.forEach((chunk, index) => { chunk.rerankScore = scores.get(index) ?? -Infinity; });
-          subset.sort((a, b) => b.rerankScore - a.rerankScore);
-          merged = subset.concat(merged.slice(subset.length));
+    if (merged.length > 1) {
+      const sourceOnly = !config.rag.rerank.enabled;
+      const subset = sourceOnly
+        ? merged.filter(chunk => chunk.sourceId && chunk.rerankEnabled !== false).slice(0, Math.max(1, config.rag.rerank.candidates || topK))
+        : merged.slice(0, Math.min(config.rag.rerank.candidates, merged.length));
+      if (subset.length > 1) {
+        try {
+          const ranks = await this.client.rerank(query, subset.map(chunk => chunk.text), options.signal, { force: sourceOnly });
+          if (ranks?.length) {
+            const scores = new Map(ranks.map(item => [item.index, item.score]));
+            const ranked = subset.map((chunk, index) => ({ ...chunk, rerankScore: scores.get(index) ?? -Infinity }))
+              .sort((a, b) => b.rerankScore - a.rerankScore);
+            if (sourceOnly) {
+              let next = 0;
+              merged = merged.map(chunk => chunk.sourceId && chunk.rerankEnabled !== false && next < ranked.length ? ranked[next++] : chunk);
+            } else merged = ranked.concat(merged.slice(subset.length));
+          }
+        } catch (error) {
+          this.output.appendLine(`[rag] rerank fallback: ${error.message || error}`);
         }
-      } catch (error) {
-        this.output.appendLine(`[rag] rerank fallback: ${error.message || error}`);
       }
     }
     return diversifyResults(merged, topK);
