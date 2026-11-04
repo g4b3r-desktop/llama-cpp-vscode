@@ -95,7 +95,7 @@ class KnowledgeSourcesViewProvider {
         if (directories === undefined) return;
         const extensions = await vscode.window.showInputBox({
           title: 'Extensões da Knowledge Source',
-          prompt: 'Informe extensões separadas por vírgula, com ou sem ponto. Ex.: html, md, js, ts',
+          prompt: 'Informe extensões separadas por vírgula, com ou sem ponto. Vazio = todas. Ex.: html, md, js, ts',
           value: (source.extensions || []).join(', '),
           ignoreFocusOut: true
         });
