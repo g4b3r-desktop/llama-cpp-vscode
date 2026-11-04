@@ -90,7 +90,7 @@ function normalizeSourceDirectories(values) {
   for (const directory of normalized) {
     if (path.posix.isAbsolute(directory) || path.win32.isAbsolute(directory)
       || directory.split('/').some(segment => !segment || segment === '.' || segment === '..')
-      || directory.split('/').some(segment => ['*', '?', '[', ']', '{', '}', '#', '!', ':'].some(character => segment.includes(character)))
+      || directory.split('/').some(segment => ['*', '?', '[', ']', '{', '}', '#', '!', ':', ','].some(character => segment.includes(character)))
       || directory.length > 200) {
       throw new Error('Invalid include directory: ' + directory);
     }
