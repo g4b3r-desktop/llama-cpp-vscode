@@ -7,6 +7,7 @@ const { parseDocument } = require('./KnowledgeDocumentParser');
 const { tokenize } = require('../workspaceIndex');
 const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter, normalizeSelectedFiles, matchesSelectedFile, normalizeSourceTags, matchesRetrievalScope } = require('./sourceUtils');
 const { runEmbeddingBatches } = require('./embeddingQueue');
+const { elapsedMs, logRagMetrics } = require('../ragMetrics');
 
 const INDEX_VERSION = 1;
 const INCLUDE_GLOB = '**/*.{html,htm,md,mdx,txt,json,jsonc,js,jsx,mjs,cjs,ts,tsx,py,java,c,cc,cpp,h,hpp,cs,go,rs,php,rb,swift,kt,kts,scala,sh,bash,zsh,lua,vue,svelte,css,scss,less,xml,yaml,yml,sql,graphql,gql,proto}';
@@ -530,6 +531,8 @@ class KnowledgeSourcesManager {
 
   async performReindex(source, progress, token) {
     const config = getConfig();
+    const operationStartedAt = Date.now();
+    const timings = { indexing: 0, embedding: 0, persistence: 0 };
     if (!vscode.workspace.isTrusted) throw new Error('Knowledge Sources require a trusted VS Code workspace.');
     const controller = new AbortController();
     this.controllers.set(source.id, controller);
@@ -542,6 +545,7 @@ class KnowledgeSourcesManager {
     source.progress = { phase: 'scan', current: 0, total: 0, completedItems: 0, totalItems: 0 };
     this.emitChanged();
     try {
+      const indexingStartedAt = Date.now();
       const rootUri = vscode.Uri.parse(source.rootUri);
       const rootReal = await fs.realpath(source.rootPath);
       const include = new vscode.RelativePattern(rootUri, buildSourceIncludeGlob(source));
@@ -628,6 +632,7 @@ class KnowledgeSourcesManager {
           source.errors.push({ file: filename, message: error instanceof Error ? error.message : String(error) });
         }
       }
+      timings.indexing += elapsedMs(indexingStartedAt);
       if (truncated) {
         for (const [filename, document] of Object.entries(previous)) {
           if (!Object.prototype.hasOwnProperty.call(nextDocuments, filename) && matchesSourceFilter(filename, source)
@@ -660,11 +665,14 @@ class KnowledgeSourcesManager {
         batchesTotal: Math.ceil(pending.length / batchSize),
         concurrency
       };
+      let persistenceStartedAt = Date.now();
       await this.saveIndex(source);
       await this.persistCatalog();
+      timings.persistence += elapsedMs(persistenceStartedAt);
       this.emitChanged();
 
       if (pending.length) {
+        const embeddingStartedAt = Date.now();
         try {
           const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
           const checkpointQueue = [];
@@ -726,6 +734,8 @@ class KnowledgeSourcesManager {
           source.error = 'Embeddings indisponíveis; busca BM25 permanece disponível: ' + (error instanceof Error ? error.message : String(error));
           embeddingFailed = true;
           this.output?.appendLine('[knowledge-sources] ' + source.name + ': ' + source.error);
+        } finally {
+          timings.embedding += elapsedMs(embeddingStartedAt);
         }
       }
 
@@ -754,13 +764,17 @@ class KnowledgeSourcesManager {
       };
       if (source.errors.length && !source.error) source.error = source.errors.length + ' file(s) could not be indexed.';
       source.updatedAt = source.lastIndexedAt;
+      persistenceStartedAt = Date.now();
       await this.saveIndex(source);
       if (!source.needsEmbedding) await this.clearEmbeddingCheckpoint(source.id);
       await this.persistCatalog();
+      timings.persistence += elapsedMs(persistenceStartedAt);
+      logRagMetrics(this.output, 'knowledge_source_index', { ...timings, total: elapsedMs(operationStartedAt) }, { source: source.name, files: source.files, chunks: source.chunks, vectors: source.vectors, changed_files: changed.length, status: embeddingFailed ? 'partial' : 'success' });
       this.output?.appendLine('[knowledge-sources] Indexed ' + source.name + ': ' + source.files + ' files / ' + source.chunks + ' chunks / ' + source.vectors + ' vectors; updated ' + changed.length + ' file(s).');
       progress?.report({ message: 'Concluído: ' + source.files + ' arquivos, ' + source.chunks + ' chunks, ' + source.vectors + ' embeddings.' });
       return this.summarize(source);
     } catch (error) {
+      logRagMetrics(this.output, 'knowledge_source_index', { ...timings, total: elapsedMs(operationStartedAt) }, { source: source.name, status: signal.aborted ? 'cancelled' : 'error', error: error instanceof Error ? error.message : String(error) });
       source.status = signal.aborted ? 'cancelled' : 'error';
       source.error = error instanceof Error ? error.message : String(error);
       if (!signal.aborted) this.output?.appendLine('[knowledge-sources:error] ' + source.name + ': ' + source.error);
@@ -843,6 +857,7 @@ class KnowledgeSourcesManager {
       return;
     }
 
+    const embeddingStartedAt = Date.now();
     const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 4));
     const concurrency = Math.max(1, Math.min(4, Number(config.rag.embedding.concurrency || 1)));
     const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
@@ -860,7 +875,8 @@ class KnowledgeSourcesManager {
     };
     this.emitChanged();
 
-    await runEmbeddingBatches(pending, {
+    try {
+      await runEmbeddingBatches(pending, {
       batchSize,
       concurrency,
       signal,
@@ -904,7 +920,10 @@ class KnowledgeSourcesManager {
         };
         if (batchProgress.completedBatches % 4 === 0 || batchProgress.completedBatches === batchProgress.totalBatches) this.emitChanged();
       }
-    });
+      });
+    } finally {
+      logRagMetrics(this.output, 'knowledge_source_embedding', { embedding: elapsedMs(embeddingStartedAt) }, { source: source.name, chunks: pending.length, batch_size: batchSize, concurrency, status: signal?.aborted ? 'cancelled' : 'finished' });
+    }
 
     chunks = this.flattenDocuments(source, documents);
     const dimensions = new Set(chunks.filter(chunk => chunk.vector?.length).map(chunk => chunk.vector.length));
@@ -915,9 +934,11 @@ class KnowledgeSourcesManager {
     source.needsEmbedding = chunks.some(chunk => !chunk.vector?.length);
     source.progress = { phase: 'complete', current: source.vectors, total: chunks.length, completedItems: pending.length, totalItems: pending.length, batchesCompleted: source.progress?.batchesTotal || 0, batchesTotal: source.progress?.batchesTotal || 0, concurrency };
     source.error = null;
+    const persistenceStartedAt = Date.now();
     await this.saveIndex(source);
     if (!source.needsEmbedding) await this.clearEmbeddingCheckpoint(source.id);
     await this.persistCatalog();
+    logRagMetrics(this.output, 'knowledge_source_embedding_refresh', { persistence: elapsedMs(persistenceStartedAt) }, { source: source.name, chunks: chunks.length, vectors: source.vectors });
     this.emitChanged();
   }
 
