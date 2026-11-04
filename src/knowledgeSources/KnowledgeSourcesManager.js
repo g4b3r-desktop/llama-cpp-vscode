@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const { getConfig } = require('../config');
 const { parseDocument } = require('./KnowledgeDocumentParser');
 const { tokenize } = require('../workspaceIndex');
-const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256 } = require('./sourceUtils');
+const { isValidSourceId, isBlockedRoot, isSensitiveFilename, isInside, normalizeRelative, isSafeDocumentPath, looksBinary, sha256, DEFAULT_SOURCE_EXTENSIONS, normalizeSourceExtensions, normalizeSourceDirectories, buildSourceIncludeGlob, sourceFiltersFingerprint, matchesSourceFilter } = require('./sourceUtils');
+const { runEmbeddingBatches } = require('./embeddingQueue');
 
 const INDEX_VERSION = 1;
 const INCLUDE_GLOB = '**/*.{html,htm,md,mdx,txt,json,jsonc,js,jsx,mjs,cjs,ts,tsx,py,java,c,cc,cpp,h,hpp,cs,go,rs,php,rb,swift,kt,kts,scala,sh,bash,zsh,lua,vue,svelte,css,scss,less,xml,yaml,yml,sql,graphql,gql,proto}';
@@ -59,6 +60,10 @@ class KnowledgeSourcesManager {
             rootUri: vscode.Uri.file(rootPath).toString(),
             rootPath,
             enabled: !rootError && item.enabled !== false,
+            includeDirectories: normalizeSourceDirectories(item.includeDirectories || []),
+            extensions: normalizeSourceExtensions(item.extensions || DEFAULT_SOURCE_EXTENSIONS),
+            progress: null,
+            needsFilterRefresh: false,
             createdAt: item.createdAt || new Date().toISOString(),
             updatedAt: item.updatedAt || new Date().toISOString(),
             lastIndexedAt: item.lastIndexedAt || null,
@@ -96,6 +101,8 @@ class KnowledgeSourcesManager {
           type: source.type,
           rootUri: source.rootUri,
           enabled: source.enabled,
+          includeDirectories: source.includeDirectories || [],
+          extensions: source.extensions || DEFAULT_SOURCE_EXTENSIONS,
           createdAt: source.createdAt,
           updatedAt: source.updatedAt,
           lastIndexedAt: source.lastIndexedAt,
@@ -140,6 +147,7 @@ class KnowledgeSourcesManager {
         for (const chunk of safeChunks) chunks.push(this.toSearchChunk(source, filename, chunk, safeDocument.hash));
       }
       const currentFingerprint = embeddingFingerprint();
+      source.needsFilterRefresh = raw.filtersFingerprint !== sourceFiltersFingerprint(source);
       const vectors = chunks.filter(chunk => chunk.vector?.length);
       const dimensions = new Set(vectors.map(chunk => chunk.vector.length));
       const refreshVectors = raw.embeddingFingerprint !== currentFingerprint || dimensions.size > 1;
@@ -176,6 +184,7 @@ class KnowledgeSourcesManager {
       indexedAt: source.lastIndexedAt,
       embeddingFingerprint: embeddingFingerprint(),
       parserFingerprint: parserFingerprint(),
+      filtersFingerprint: sourceFiltersFingerprint(source),
       embeddingDimension: source.embeddingDimension || null,
       documents
     };
@@ -208,6 +217,10 @@ class KnowledgeSourcesManager {
       rootUri: vscode.Uri.file(rootPath).toString(),
       rootPath,
       enabled: true,
+      includeDirectories: [],
+      extensions: [...DEFAULT_SOURCE_EXTENSIONS],
+      progress: null,
+      needsFilterRefresh: false,
       createdAt: now,
       updatedAt: now,
       lastIndexedAt: null,
@@ -249,6 +262,22 @@ class KnowledgeSourcesManager {
       this.disposeWatcher(source.id);
     }
     source.updatedAt = new Date().toISOString();
+    await this.persistCatalog();
+    this.emitChanged();
+    return this.summarize(source);
+  }
+
+  async configureFilters(sourceId, options = {}) {
+    await this.ready;
+    const source = this.requireSource(sourceId);
+    source.includeDirectories = normalizeSourceDirectories(options.includeDirectories || []);
+    source.extensions = normalizeSourceExtensions(options.extensions || []);
+    source.needsFilterRefresh = true;
+    source.status = 'stale';
+    source.error = null;
+    source.updatedAt = new Date().toISOString();
+    this.disposeWatcher(source.id);
+    this.setupWatcher(source);
     await this.persistCatalog();
     this.emitChanged();
     return this.summarize(source);
@@ -320,25 +349,31 @@ class KnowledgeSourcesManager {
     source.status = 'indexing';
     source.error = null;
     source.errors = [];
+    source.progress = { phase: 'scan', current: 0, total: 0, completedItems: 0, totalItems: 0 };
     this.emitChanged();
     try {
       const rootUri = vscode.Uri.parse(source.rootUri);
       const rootReal = await fs.realpath(source.rootPath);
-      const include = new vscode.RelativePattern(rootUri, INCLUDE_GLOB);
+      const include = new vscode.RelativePattern(rootUri, buildSourceIncludeGlob(source));
       const exclude = new vscode.RelativePattern(rootUri, EXCLUDE_GLOB);
       const maxFiles = Math.max(1, Number(config.rag.knowledgeSources.maxFiles || 2000));
       const found = await vscode.workspace.findFiles(include, exclude, maxFiles + 1);
       const truncated = found.length > maxFiles;
       const files = found.slice(0, maxFiles);
       const previous = this.documents.get(source.id) || {};
-      const nextDocuments = {};
+      const nextDocuments = Object.create(null);
       const changed = [];
       if (truncated) source.errors.push({ file: '', message: 'Source exceeded maxFiles; additional documents were not scanned.' });
+      source.progress = { phase: 'scan', current: 0, total: files.length, completedItems: 0, totalItems: 0 };
       let processed = 0;
       for (const uri of files) {
         checkCancelled();
         processed += 1;
-        if (processed % 15 === 0) progress?.report({ message: 'Lendo ' + processed + '/' + files.length + ' arquivos…' });
+        if (processed % 50 === 0 || processed === files.length) {
+          source.progress = { phase: 'scan', current: processed, total: files.length, completedItems: 0, totalItems: 0 };
+          progress?.report({ message: 'Lendo ' + processed + '/' + files.length + ' arquivos…' });
+          this.emitChanged();
+        }
         const filename = normalizeRelative(path.relative(source.rootPath, uri.fsPath));
         if (!filename || filename.startsWith('../') || isSensitiveFilename(filename)) continue;
         try {
@@ -381,37 +416,96 @@ class KnowledgeSourcesManager {
           nextDocuments[filename] = doc;
           changed.push(filename);
         } catch (error) {
-          if (previous[filename]) nextDocuments[filename] = previous[filename];
+          if (previous[filename] && matchesSourceFilter(filename, source)) nextDocuments[filename] = previous[filename];
           source.errors.push({ file: filename, message: error instanceof Error ? error.message : String(error) });
         }
       }
       if (truncated) {
         for (const [filename, document] of Object.entries(previous)) {
-          if (!Object.prototype.hasOwnProperty.call(nextDocuments, filename)) nextDocuments[filename] = document;
+          if (!Object.prototype.hasOwnProperty.call(nextDocuments, filename) && matchesSourceFilter(filename, source)) nextDocuments[filename] = document;
         }
       }
       checkCancelled();
+
+      source.needsFilterRefresh = false;
       let chunks = this.flattenDocuments(source, nextDocuments);
-      let embeddingFailed = false;
       const vectorEnabled = config.rag.embedding.enabled && config.rag.strategy !== 'bm25';
-      if (vectorEnabled && chunks.some(chunk => !chunk.vector?.length)) {
+      let embeddingFailed = false;
+
+      // Publish and persist the text index before generating vectors. A restart can resume missing vectors.
+      this.documents.set(source.id, nextDocuments);
+      this.indexes.set(source.id, chunks);
+      source.files = Object.keys(nextDocuments).length;
+      source.chunks = chunks.length;
+      source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
+      const pending = vectorEnabled ? chunks.filter(chunk => !chunk.vector?.length) : [];
+      const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 4));
+      const concurrency = Math.max(1, Math.min(4, Number(config.rag.embedding.concurrency || 1)));
+      source.progress = {
+        phase: pending.length ? 'embedding' : 'complete',
+        current: source.vectors,
+        total: chunks.length,
+        completedItems: 0,
+        totalItems: pending.length,
+        batchesCompleted: 0,
+        batchesTotal: Math.ceil(pending.length / batchSize),
+        concurrency
+      };
+      await this.saveIndex(source);
+      await this.persistCatalog();
+      this.emitChanged();
+
+      if (pending.length) {
         try {
-          const pending = chunks.filter(chunk => !chunk.vector?.length);
-          const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 16));
-          for (let i = 0; i < pending.length; i += batchSize) {
-            checkCancelled();
-            const batch = pending.slice(i, i + batchSize);
-            const inputs = batch.map(chunk => 'source: ' + source.name + '\nfile: ' + chunk.filename + '\nsection: ' + (chunk.section || '') + '\n' + chunk.text).map(value => value.slice(0, config.rag.embedding.maxCharacters));
-            const vectors = await this.client.embed(inputs, signal);
-            for (const vector of vectors) {
-              if (source.embeddingDimension && vector.length !== source.embeddingDimension) throw new Error('Embedding dimension changed from ' + source.embeddingDimension + ' to ' + vector.length + '. Rebuild this source using a consistent embedding model.');
+          const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
+          await runEmbeddingBatches(pending, {
+            batchSize,
+            concurrency,
+            signal,
+            processBatch: batch => this.client.embed(
+              batch.map(chunk => ('source: ' + source.name + '\nfile: ' + chunk.filename + '\nsection: ' + (chunk.section || '') + '\n' + chunk.text).slice(0, maxCharacters)),
+              signal
+            ),
+            onBatchSuccess: (batch, vectors) => {
+              if (!Array.isArray(vectors) || vectors.length !== batch.length) {
+                throw new Error('Embedding endpoint returned ' + (Array.isArray(vectors) ? vectors.length : 0) + ' vectors for ' + batch.length + ' chunks.');
+              }
+              for (let index = 0; index < batch.length; index += 1) {
+                const vector = vectors[index];
+                if (!Array.isArray(vector) || !vector.length) throw new Error('Embedding endpoint returned an empty vector.');
+                if (source.embeddingDimension && vector.length !== source.embeddingDimension) {
+                  throw new Error('Embedding dimension changed from ' + source.embeddingDimension + ' to ' + vector.length + '. Rebuild this source using a consistent embedding model.');
+                }
+                const document = nextDocuments[batch[index].filename];
+                const target = document?.chunks?.find(item => item.id === batch[index].id);
+                if (target) target.vector = vector;
+                if (!source.embeddingDimension) source.embeddingDimension = vector.length;
+              }
+            },
+            onWaveComplete: async batchProgress => {
+              // Checkpoint every completed wave, including successful batches from a partially failed wave.
+              chunks = this.flattenDocuments(source, nextDocuments);
+              this.indexes.set(source.id, chunks);
+              source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
+              source.progress = {
+                phase: 'embedding',
+                current: source.vectors,
+                total: chunks.length,
+                completedItems: batchProgress.completedItems,
+                totalItems: batchProgress.totalItems,
+                batchesCompleted: batchProgress.completedBatches,
+                batchesTotal: batchProgress.totalBatches,
+                concurrency: batchProgress.concurrency
+              };
+              await this.saveIndex(source);
+              await this.persistCatalog();
+              this.emitChanged();
+              progress?.report({
+                message: 'Embeddings ' + source.vectors + '/' + chunks.length +
+                  ' · lotes ' + batchProgress.completedBatches + '/' + batchProgress.totalBatches
+              });
             }
-            for (let j = 0; j < batch.length; j += 1) {
-              const target = nextDocuments[batch[j].filename].chunks.find(item => item.id === batch[j].id);
-              if (target) target.vector = vectors[j];
-            }
-            progress?.report({ message: 'Criando embeddings ' + Math.min(i + batch.length, pending.length) + '/' + pending.length + '…' });
-          }
+          });
         } catch (error) {
           if (signal.aborted) throw error;
           source.error = 'Embeddings indisponíveis; busca BM25 permanece disponível: ' + (error instanceof Error ? error.message : String(error));
@@ -419,6 +513,7 @@ class KnowledgeSourcesManager {
           this.output?.appendLine('[knowledge-sources] ' + source.name + ': ' + source.error);
         }
       }
+
       chunks = this.flattenDocuments(source, nextDocuments);
       const dimensions = new Set(chunks.filter(chunk => chunk.vector?.length).map(chunk => chunk.vector.length));
       if (dimensions.size > 1) throw new Error('Embedding vectors have inconsistent dimensions; the previous index was preserved.');
@@ -426,18 +521,28 @@ class KnowledgeSourcesManager {
       this.indexes.set(source.id, chunks);
       source.embeddingDimension = dimensions.size === 1 ? [...dimensions][0] : source.embeddingDimension;
       source.needsRechunk = false;
-      source.needsEmbedding = !embeddingFailed && vectorEnabled && chunks.some(chunk => !chunk.vector?.length);
+      source.needsEmbedding = vectorEnabled && chunks.some(chunk => !chunk.vector?.length);
       source.files = Object.keys(nextDocuments).length;
       source.chunks = chunks.length;
       source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
       source.lastIndexedAt = new Date().toISOString();
       source.status = 'indexed';
+      source.progress = {
+        phase: embeddingFailed ? 'paused' : 'complete',
+        current: source.vectors,
+        total: chunks.length,
+        completedItems: source.vectors,
+        totalItems: chunks.length,
+        batchesCompleted: source.progress?.batchesCompleted || 0,
+        batchesTotal: source.progress?.batchesTotal || 0,
+        concurrency
+      };
       if (source.errors.length && !source.error) source.error = source.errors.length + ' file(s) could not be indexed.';
       source.updatedAt = source.lastIndexedAt;
       await this.saveIndex(source);
       await this.persistCatalog();
       this.output?.appendLine('[knowledge-sources] Indexed ' + source.name + ': ' + source.files + ' files / ' + source.chunks + ' chunks / ' + source.vectors + ' vectors; updated ' + changed.length + ' file(s).');
-      progress?.report({ message: 'Concluído: ' + source.files + ' arquivos, ' + source.chunks + ' chunks.' });
+      progress?.report({ message: 'Concluído: ' + source.files + ' arquivos, ' + source.chunks + ' chunks, ' + source.vectors + ' embeddings.' });
       return this.summarize(source);
     } catch (error) {
       source.status = signal.aborted ? 'cancelled' : 'error';
@@ -460,11 +565,12 @@ class KnowledgeSourcesManager {
     const selectedIds = Array.isArray(options.sourceIds) && options.sourceIds.length ? new Set(options.sourceIds.map(String)) : null;
     for (const source of this.sources.values()) {
       if (!source.enabled || (selectedIds && !selectedIds.has(source.id))) continue;
-      if ((source.status !== 'indexed' || source.needsRechunk) && config.rag.knowledgeSources.autoIndex) {
+      if ((source.status !== 'indexed' || source.needsRechunk || source.needsFilterRefresh) && config.rag.knowledgeSources.autoIndex) {
         try { await this.reindexSource(source.id, false); } catch (error) {
           this.output?.appendLine('[knowledge-sources] automatic indexing skipped for ' + source.name + ': ' + error.message);
         }
       }
+      if (source.needsFilterRefresh && !config.rag.knowledgeSources.autoIndex) continue;
       if (source.needsEmbedding && config.rag.knowledgeSources.autoIndex) {
         try { await this.refreshCachedEmbeddings(source, options.signal); } catch (error) {
           source.needsEmbedding = false;
@@ -481,30 +587,80 @@ class KnowledgeSourcesManager {
   async refreshCachedEmbeddings(source, signal) {
     const config = getConfig();
     const documents = this.documents.get(source.id) || {};
-    const chunks = this.flattenDocuments(source, documents);
+    let chunks = this.flattenDocuments(source, documents);
     const pending = chunks.filter(chunk => !chunk.vector?.length);
-    if (config.rag.embedding.enabled && config.rag.strategy !== 'bm25' && pending.length) {
-      const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 16));
-      for (let i = 0; i < pending.length; i += batchSize) {
-        if (signal?.aborted) throw new Error('Embedding refresh cancelled.');
-        const batch = pending.slice(i, i + batchSize);
-        const vectors = await this.client.embed(batch.map(chunk => ('source: ' + source.name + '\nfile: ' + chunk.filename + '\n' + chunk.text).slice(0, config.rag.embedding.maxCharacters)), signal);
-        for (const vector of vectors) {
-          if (source.embeddingDimension && vector.length !== source.embeddingDimension) throw new Error('Embedding dimension changed from ' + source.embeddingDimension + ' to ' + vector.length + '.');
-        }
-        for (let j = 0; j < batch.length; j += 1) {
-          const target = documents[batch[j].filename]?.chunks?.find(item => item.id === batch[j].id);
-          if (target) target.vector = vectors[j];
-        }
-      }
+    if (!config.rag.embedding.enabled || config.rag.strategy === 'bm25' || !pending.length) {
+      source.needsEmbedding = false;
+      return;
     }
-    const refreshed = this.flattenDocuments(source, documents);
-    const dimensions = new Set(refreshed.filter(chunk => chunk.vector?.length).map(chunk => chunk.vector.length));
+
+    const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 4));
+    const concurrency = Math.max(1, Math.min(4, Number(config.rag.embedding.concurrency || 1)));
+    const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
+    source.progress = {
+      phase: 'embedding',
+      current: chunks.filter(chunk => chunk.vector?.length).length,
+      total: chunks.length,
+      completedItems: 0,
+      totalItems: pending.length,
+      batchesCompleted: 0,
+      batchesTotal: Math.ceil(pending.length / batchSize),
+      concurrency
+    };
+    this.emitChanged();
+
+    await runEmbeddingBatches(pending, {
+      batchSize,
+      concurrency,
+      signal,
+      processBatch: batch => this.client.embed(
+        batch.map(chunk => ('source: ' + source.name + '\nfile: ' + chunk.filename + '\nsection: ' + (chunk.section || '') + '\n' + chunk.text).slice(0, maxCharacters)),
+        signal
+      ),
+      onBatchSuccess: (batch, vectors) => {
+        if (!Array.isArray(vectors) || vectors.length !== batch.length) {
+          throw new Error('Embedding endpoint returned an unexpected number of vectors.');
+        }
+        for (let index = 0; index < batch.length; index += 1) {
+          const vector = vectors[index];
+          if (!Array.isArray(vector) || !vector.length) throw new Error('Embedding endpoint returned an empty vector.');
+          if (source.embeddingDimension && vector.length !== source.embeddingDimension) {
+            throw new Error('Embedding dimension changed from ' + source.embeddingDimension + ' to ' + vector.length + '.');
+          }
+          const target = documents[batch[index].filename]?.chunks?.find(item => item.id === batch[index].id);
+          if (target) target.vector = vector;
+          if (!source.embeddingDimension) source.embeddingDimension = vector.length;
+        }
+      },
+      onWaveComplete: async batchProgress => {
+        chunks = this.flattenDocuments(source, documents);
+        this.indexes.set(source.id, chunks);
+        source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
+        source.progress = {
+          phase: 'embedding',
+          current: source.vectors,
+          total: chunks.length,
+          completedItems: batchProgress.completedItems,
+          totalItems: batchProgress.totalItems,
+          batchesCompleted: batchProgress.completedBatches,
+          batchesTotal: batchProgress.totalBatches,
+          concurrency: batchProgress.concurrency
+        };
+        source.needsEmbedding = chunks.some(chunk => !chunk.vector?.length);
+        await this.saveIndex(source);
+        await this.persistCatalog();
+        this.emitChanged();
+      }
+    });
+
+    chunks = this.flattenDocuments(source, documents);
+    const dimensions = new Set(chunks.filter(chunk => chunk.vector?.length).map(chunk => chunk.vector.length));
     if (dimensions.size > 1) throw new Error('Embedding vectors have inconsistent dimensions.');
-    this.indexes.set(source.id, refreshed);
-    source.vectors = refreshed.filter(chunk => chunk.vector?.length).length;
+    this.indexes.set(source.id, chunks);
+    source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
     source.embeddingDimension = dimensions.size === 1 ? [...dimensions][0] : source.embeddingDimension;
-    source.needsEmbedding = false;
+    source.needsEmbedding = chunks.some(chunk => !chunk.vector?.length);
+    source.progress = { phase: 'complete', current: source.vectors, total: chunks.length, completedItems: pending.length, totalItems: pending.length, batchesCompleted: source.progress?.batchesTotal || 0, batchesTotal: source.progress?.batchesTotal || 0, concurrency };
     source.error = null;
     await this.saveIndex(source);
     await this.persistCatalog();
@@ -546,7 +702,7 @@ class KnowledgeSourcesManager {
   setupWatcher(source) {
     if (!source.enabled || this.watchers.has(source.id) || getConfig().rag.knowledgeSources.watch === false) return;
     try {
-      const pattern = new vscode.RelativePattern(vscode.Uri.parse(source.rootUri), '**/*');
+      const pattern = new vscode.RelativePattern(vscode.Uri.parse(source.rootUri), buildSourceIncludeGlob(source));
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
       const refresh = () => this.scheduleRefresh(source.id);
       watcher.onDidCreate(refresh);
@@ -605,6 +761,9 @@ class KnowledgeSourcesManager {
       error: source.error,
       errors: (source.errors || []).slice(0, 30),
       documents: Object.keys(this.documents.get(source.id) || {}).slice(0, 20),
+      includeDirectories: source.includeDirectories || [],
+      extensions: source.extensions || DEFAULT_SOURCE_EXTENSIONS,
+      progress: source.progress || null,
       indexing: this.indexing.has(source.id)
     };
   }
