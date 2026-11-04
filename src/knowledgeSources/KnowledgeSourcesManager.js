@@ -532,7 +532,7 @@ class KnowledgeSourcesManager {
   async performReindex(source, progress, token) {
     const config = getConfig();
     const operationStartedAt = Date.now();
-    const timings = { indexing: 0, embedding: 0, persistence: 0 };
+    const timings = { indexing: 0, embedding: 0, checkpoint_persistence: 0, persistence: 0 };
     if (!vscode.workspace.isTrusted) throw new Error('Knowledge Sources require a trusted VS Code workspace.');
     const controller = new AbortController();
     this.controllers.set(source.id, controller);
@@ -706,7 +706,11 @@ class KnowledgeSourcesManager {
             },
             onWaveComplete: async batchProgress => {
               // Append only the completed vectors; do not rewrite the full multi-megabyte index per batch.
-              await this.appendEmbeddingCheckpoint(source, checkpointQueue.splice(0));
+              const checkpointStartedAt = Date.now();
+              const checkpointStartedAt = Date.now();
+        await this.appendEmbeddingCheckpoint(source, checkpointQueue.splice(0));
+        checkpointPersistenceMs += elapsedMs(checkpointStartedAt);
+              timings.checkpoint_persistence += elapsedMs(checkpointStartedAt);
               chunks = this.flattenDocuments(source, nextDocuments);
               this.indexes.set(source.id, chunks);
               source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
@@ -858,6 +862,7 @@ class KnowledgeSourcesManager {
     }
 
     const embeddingStartedAt = Date.now();
+    let checkpointPersistenceMs = 0;
     const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 4));
     const concurrency = Math.max(1, Math.min(4, Number(config.rag.embedding.concurrency || 1)));
     const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
@@ -922,7 +927,7 @@ class KnowledgeSourcesManager {
       }
       });
     } finally {
-      logRagMetrics(this.output, 'knowledge_source_embedding', { embedding: elapsedMs(embeddingStartedAt) }, { source: source.name, chunks: pending.length, batch_size: batchSize, concurrency, status: signal?.aborted ? 'cancelled' : 'finished' });
+      logRagMetrics(this.output, 'knowledge_source_embedding', { embedding: elapsedMs(embeddingStartedAt), checkpoint_persistence: checkpointPersistenceMs }, { source: source.name, chunks: pending.length, batch_size: batchSize, concurrency, status: signal?.aborted ? 'cancelled' : 'finished' });
     }
 
     chunks = this.flattenDocuments(source, documents);
