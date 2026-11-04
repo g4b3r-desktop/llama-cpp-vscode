@@ -152,7 +152,7 @@ class KnowledgeSourcesManager {
     const expected = this.checkpointHeader(source);
     let valid = false;
     try {
-      const firstLine = (await fs.readFile(uri.fsPath, 'utf8')).split(/\\r?\\n/, 1)[0];
+      const firstLine = (await fs.readFile(uri.fsPath, 'utf8')).split(/\r?\n/, 1)[0];
       const current = JSON.parse(firstLine);
       valid = current?.type === 'meta'
         && current.sourceId === expected.sourceId
@@ -165,7 +165,7 @@ class KnowledgeSourcesManager {
     }
     if (!valid) {
       await fs.mkdir(path.dirname(uri.fsPath), { recursive: true });
-      await fs.writeFile(uri.fsPath, JSON.stringify(expected) + '\\n', 'utf8');
+      await fs.writeFile(uri.fsPath, JSON.stringify(expected) + '\n', 'utf8');
     }
     this.checkpointReady.add(source.id);
   }
@@ -181,9 +181,9 @@ class KnowledgeSourcesManager {
       return 0;
     }
     // Ignore a trailing partial JSONL record left by a process crash; all earlier newline-terminated records remain reusable.
-    const lastNewline = content.lastIndexOf('\\n');
+    const lastNewline = content.lastIndexOf('\n');
     const completeContent = lastNewline >= 0 ? content.slice(0, lastNewline) : '';
-    const lines = completeContent.split(/\\r?\\n/);
+    const lines = completeContent.split(/\r?\n/);
     let header;
     try { header = JSON.parse(lines.shift() || ''); } catch { header = null; }
     const expected = this.checkpointHeader(source);
@@ -229,7 +229,7 @@ class KnowledgeSourcesManager {
     await this.ensureEmbeddingCheckpoint(source);
     const uri = this.checkpointUri(source.id);
     if (!uri) return;
-    await fs.appendFile(uri.fsPath, JSON.stringify({ items }) + '\\n', 'utf8');
+    await fs.appendFile(uri.fsPath, JSON.stringify({ items }) + '\n', 'utf8');
   }
 
   async clearEmbeddingCheckpoint(sourceId) {
