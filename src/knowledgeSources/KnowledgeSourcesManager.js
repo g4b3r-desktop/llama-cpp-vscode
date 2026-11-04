@@ -259,7 +259,10 @@ class KnowledgeSourcesManager {
             ? chunk.vector
             : undefined
         }));
-        const safeDocument = { hash: document.hash, size: Number(document.size || 0), mtime: Number(document.mtime || 0), chunks: safeChunks };
+        const legacyMtime = typeof document.mtime === 'number' ? document.mtime : Date.parse(String(document.mtime || ''));
+        const storedMtimeMs = Number(document.mtimeMs);
+        const mtimeMs = Number.isFinite(storedMtimeMs) ? storedMtimeMs : Number.isFinite(legacyMtime) ? legacyMtime : 0;
+        const safeDocument = { hash: document.hash, size: Number(document.size || 0), mtimeMs, chunks: safeChunks };
         documents[filename] = safeDocument;
         for (const chunk of safeChunks) chunks.push(this.toSearchChunk(source, filename, chunk, safeDocument.hash));
       }
@@ -519,10 +522,17 @@ class KnowledgeSourcesManager {
             }
             continue;
           }
+          const old = previous[filename];
+          const oldMtimeMs = Number.isFinite(Number(old?.mtimeMs)) ? Number(old.mtimeMs) : Number(old?.mtime || 0);
+          if (old?.hash && Array.isArray(old.chunks) && !source.needsRechunk
+            && Number(old.size) === stat.size && oldMtimeMs === stat.mtimeMs) {
+            // Metadata is unchanged: reuse the persisted hash, chunks and vectors without reading file contents.
+            nextDocuments[filename] = old;
+            continue;
+          }
           const bytes = await fs.readFile(realPath);
           if (looksBinary(bytes)) continue;
           const hash = sha256(bytes);
-          const old = previous[filename];
           if (old?.hash === hash && Array.isArray(old.chunks) && !source.needsRechunk) {
             nextDocuments[filename] = old;
             continue;
@@ -532,7 +542,7 @@ class KnowledgeSourcesManager {
           const doc = {
             hash,
             size: stat.size,
-            mtime: stat.mtime,
+            mtimeMs: stat.mtimeMs,
             chunks: parsed.map((chunk, index) => ({
               id: source.id + ':' + hash.slice(0, 12) + ':' + index,
               title: chunk.title || '',
