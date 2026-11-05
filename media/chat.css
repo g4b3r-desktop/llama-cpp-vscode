@@ -89,6 +89,10 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 .message-author { font-size: 12px; font-weight: 650; }
 .message-time { font-size: 10px; color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: .04em; }
 .message-body { line-height: 1.55; overflow-wrap: anywhere; }
+.message-sources { margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--vscode-panel-border); font-size: .88em; overflow-wrap: anywhere; }
+.message-sources ul { margin: 5px 0 0; padding-left: 18px; }
+.message-sources li { margin: 3px 0; }
+.message-sources a { color: var(--vscode-textLink-foreground); }
 .message.user .message-body { width: fit-content; max-width: min(85%, 720px); margin-left: auto; padding: 10px 13px; border: 1px solid var(--vscode-panel-border); border-radius: 13px 13px 4px 13px; background: var(--vscode-input-background); white-space: pre-wrap; }
 .message.user .message-header { justify-content: flex-end; }
 .message.user .message-author { order: 2; }

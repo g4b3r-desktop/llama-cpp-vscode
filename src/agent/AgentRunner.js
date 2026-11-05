@@ -1,5 +1,6 @@
 const os = require('os');
 const { getConfig } = require('../config');
+const { sourcesFromToolResult, mergeSources } = require('../chat/sourceReferences');
 const { createOperationalPlan, fallbackPlan, AgentPlanState, isMutationTool, isVerificationTool } = require('./AgentPlan');
 
 class AgentRunner {
@@ -72,6 +73,7 @@ class AgentRunner {
       let diagnosticsAfterMutation = false;
       let commandVerificationAfterMutation = false;
       let finalAnswer = '';
+      let sources = [];
       let hitLimit = false;
 
       for (let planIndex = 0; planIndex < planState.steps.length; planIndex += 1) {
@@ -124,6 +126,7 @@ class AgentRunner {
             const tool = this.registry.get(call.name);
             this.emit(options, tool ? tool.actionLabel(call.arguments || {}) : `Tentando ferramenta ${call.name}...`, { kind: 'tool', phase: step.kind, tool: call.name, planStep: step.id });
             const result = await this.registry.execute(call.name, call.arguments || {}, { signal: controller.signal, step: modelTurns, planStep: step.id });
+            sources = mergeSources(sources, sourcesFromToolResult(call.name, result));
             const serialized = truncateToolResult(result, config.agent.maxToolResultCharacters || 30000);
             this.output?.appendLine(`[agent:${modelTurns}:${call.name}] ${serialized}`);
             messages.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: serialized });
@@ -154,6 +157,7 @@ class AgentRunner {
           steps: modelTurns,
           plan: planState.snapshot(),
           verification: { workspaceChanged: mutated, diagnostics: diagnosticsAfterMutation, command: commandVerificationAfterMutation },
+          sources,
           sessionId: this.history.session?.id
         };
       }
@@ -166,6 +170,7 @@ class AgentRunner {
         steps: modelTurns,
         plan: planState.snapshot(),
         verification: { workspaceChanged: mutated, diagnostics: diagnosticsAfterMutation, command: commandVerificationAfterMutation },
+        sources,
         sessionId: this.history.session?.id
       };
     } catch (error) {

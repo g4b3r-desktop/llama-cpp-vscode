@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const { buildChatContext } = require('./chatPanel');
 const { getConfig } = require('./config');
 const { VENDOR } = require('./nativeModelProvider');
+const { formatSourcesMarkdown } = require('./chat/sourceReferences');
 
 const PARTICIPANT_ID = 'llama-cpp-assistant.llama';
 
@@ -25,8 +26,8 @@ function registerNativeChat(context, client, workspaceIndex, agentController) {
             stream.progress(event.message);
           }
         });
-        stream.markdown(result.answer || 'Tarefa concluída.');
-        return { metadata: { command, model: modelOverride || defaultModel(), agentSessionId: result.sessionId, steps: result.steps, plan: result.plan, verification: result.verification } };
+        stream.markdown((result.answer || 'Tarefa concluída.') + formatSourcesMarkdown(result.sources));
+        return { metadata: { command, model: modelOverride || defaultModel(), agentSessionId: result.sessionId, steps: result.steps, plan: result.plan, verification: result.verification, sources: result.sources } };
       }
       const config = getConfig();
       const commandPrompt = commandInstruction(command);
@@ -41,7 +42,8 @@ function registerNativeChat(context, client, workspaceIndex, agentController) {
         { role: 'user', content: [request.prompt, referenceContext.blocks.join('\n\n'), autoContext.text].filter(Boolean).join('\n\n') }
       ];
       const answer = await client.chatStream(messages, controller.signal, delta => stream.markdown(delta), { model: modelOverride });
-      return { metadata: { command, model: modelOverride || defaultModel(), answerLength: answer.length, references: referenceContext.labels, includeHistory } };
+      stream.markdown(formatSourcesMarkdown(autoContext.sources));
+      return { metadata: { command, model: modelOverride || defaultModel(), answerLength: answer.length, references: referenceContext.labels, sources: autoContext.sources, includeHistory } };
     } catch (error) {
       if (controller.signal.aborted) return;
       client.logError('native chat', error);

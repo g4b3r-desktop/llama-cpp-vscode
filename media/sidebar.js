@@ -80,6 +80,37 @@
     div.appendChild(body);
     if (meta) { const info = document.createElement('div'); info.className = 'message-meta'; info.textContent = meta; div.appendChild(info); }
     messages.appendChild(div); scrollBottom();
+    return div;
+  }
+
+  function createSources(sources) {
+    if (!Array.isArray(sources) || !sources.length) return undefined;
+    const section = document.createElement('section');
+    section.className = 'message-sources';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Fontes';
+    const list = document.createElement('ul');
+    for (const source of sources) {
+      const item = document.createElement('li');
+      if (source?.type === 'web' && /^https?:\/\//i.test(String(source.url || ''))) {
+        const link = document.createElement('a');
+        link.href = '#';
+        link.dataset.external = source.url;
+        link.textContent = `${source.title || source.url} — ${source.url}`;
+        item.appendChild(link);
+      } else if (source?.type === 'knowledge') {
+        const location = [source.file, source.section, source.startLine ? `linhas ${source.startLine}${source.endLine && source.endLine !== source.startLine ? `-${source.endLine}` : ''}` : '']
+          .filter(Boolean)
+          .join(' · ');
+        item.textContent = [source.source || 'Documentação local', location].filter(Boolean).join(' — ');
+      } else {
+        continue;
+      }
+      list.appendChild(item);
+    }
+    if (!list.childElementCount) return undefined;
+    section.append(heading, list);
+    return section;
   }
 
   function addAssistant(id) {
@@ -89,7 +120,7 @@
     body.className = 'markdown-body';
     div.appendChild(body);
     messages.appendChild(div);
-    assistantNodes.set(id, { node: body, raw: '' });
+    assistantNodes.set(id, { node: body, container: div, raw: '' });
     scrollBottom();
   }
 
@@ -167,7 +198,11 @@
       messages.textContent = '';
       for (const entry of msg.transcript || []) {
         if (entry.role === 'user') add('user', entry.text || '', false, entry.meta || entry.mode || '');
-        else add('assistant', entry.text || '', true);
+        else {
+          const assistant = add('assistant', entry.text || '', true);
+          const sources = createSources(entry.sources);
+          if (sources) assistant.appendChild(sources);
+        }
       }
     } else if (msg.type === 'user') {
       add('user', msg.text || '', false, `${String(msg.mode || '').toUpperCase()}${msg.activeFilename && msg.includeActiveFile ? ` · ${msg.activeFilename}` : ''}`);
@@ -176,7 +211,14 @@
     else if (msg.type === 'assistantDelta') {
       const entry = assistantNodes.get(msg.id);
       if (entry) { entry.raw += msg.text || ''; entry.node.innerHTML = renderMarkdown(entry.raw); scrollBottom(); }
-    } else if (msg.type === 'assistantDone') assistantNodes.delete(msg.id);
+    } else if (msg.type === 'assistantDone') {
+      const assistant = assistantNodes.get(msg.id);
+      if (assistant) {
+        const sources = createSources(msg.sources);
+        if (sources) assistant.container.appendChild(sources);
+      }
+      assistantNodes.delete(msg.id);
+    }
     else if (msg.type === 'agentProgress') {
       const data = msg.event || {};
       if (data.kind === 'plan') renderPlan(data.plan, data.phase);

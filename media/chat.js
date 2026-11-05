@@ -182,6 +182,36 @@
     return footer;
   }
 
+  function createSources(sources) {
+    if (!Array.isArray(sources) || !sources.length) return undefined;
+    const section = document.createElement('section');
+    section.className = 'message-sources';
+    const heading = document.createElement('strong');
+    heading.textContent = 'Fontes';
+    const list = document.createElement('ul');
+    for (const source of sources) {
+      const item = document.createElement('li');
+      if (source?.type === 'web' && /^https?:\/\//i.test(String(source.url || ''))) {
+        const link = document.createElement('a');
+        link.href = '#';
+        link.dataset.external = source.url;
+        link.textContent = `${source.title || source.url} — ${source.url}`;
+        item.appendChild(link);
+      } else if (source?.type === 'knowledge') {
+        const location = [source.file, source.section, source.startLine ? `linhas ${source.startLine}${source.endLine && source.endLine !== source.startLine ? `-${source.endLine}` : ''}` : '']
+          .filter(Boolean)
+          .join(' · ');
+        item.textContent = [source.source || 'Documentação local', location].filter(Boolean).join(' — ');
+      } else {
+        continue;
+      }
+      list.appendChild(item);
+    }
+    if (!list.childElementCount) return undefined;
+    section.append(heading, list);
+    return section;
+  }
+
   function createMessage(entry) {
     const id = `entry-${++entrySerial}`;
     const article = document.createElement('article');
@@ -205,7 +235,10 @@
     if (entry.role === 'assistant') body.innerHTML = renderMarkdown(entry.text || '');
     else body.textContent = entry.text || '';
 
-    article.append(header, body, createActions(entry));
+    article.append(header, body);
+    const sources = createSources(entry.sources);
+    if (sources) article.appendChild(sources);
+    article.appendChild(createActions(entry));
     entryStore.set(id, entry);
     messages.appendChild(article);
     scrollBottom();
@@ -238,16 +271,18 @@
     scrollBottom();
   }
 
-  function finishAssistant(id, timestamp, aborted) {
+  function finishAssistant(id, timestamp, aborted, sources = []) {
     const stream = assistantNodes.get(id);
     if (!stream) return;
     assistantNodes.delete(id);
     stream.article.classList.remove('streaming');
     stream.body.innerHTML = renderMarkdown(stream.raw || (aborted ? '_Resposta interrompida._' : ''));
-    const entry = { role: 'assistant', text: stream.raw || (aborted ? 'Resposta interrompida.' : ''), mode: stream.request?.mode || 'ask', timestamp: timestamp || Date.now(), request: stream.request };
+    const entry = { role: 'assistant', text: stream.raw || (aborted ? 'Resposta interrompida.' : ''), mode: stream.request?.mode || 'ask', timestamp: timestamp || Date.now(), request: stream.request, sources };
     const entryId = `entry-${++entrySerial}`;
     stream.article.dataset.entryId = entryId;
     entryStore.set(entryId, entry);
+    const sourceSection = createSources(sources);
+    if (sourceSection) stream.article.appendChild(sourceSection);
     stream.article.appendChild(createActions(entry));
     scrollBottom();
   }
@@ -443,7 +478,7 @@
         scrollBottom();
       }
     } else if (msg.type === 'assistantDone') {
-      finishAssistant(msg.id, msg.timestamp, false);
+      finishAssistant(msg.id, msg.timestamp, false, msg.sources);
     } else if (msg.type === 'assistantAbort') {
       finishAssistant(msg.id, Date.now(), true);
     } else if (msg.type === 'removeLastExchange') {

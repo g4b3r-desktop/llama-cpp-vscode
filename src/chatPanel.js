@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const { getConfig } = require('./config');
 const { normalizeMode, includeHistoryForMode, buildAgentPrompt, modeLabel } = require('./sidebar/requestMode');
+const { sourcesFromChunks, mergeSources } = require('./chat/sourceReferences');
 const {
   trimHistory,
   removeLatestHistoryExchange,
@@ -298,21 +299,23 @@ class ChatPanel {
     }
 
     const finalAnswer = answer || '(resposta vazia)';
-    const assistantEntry = { role: 'assistant', text: finalAnswer, mode, timestamp: Date.now(), request };
+    const assistantEntry = { role: 'assistant', text: finalAnswer, mode, timestamp: Date.now(), request, sources: context.sources };
     this.transcript.push(assistantEntry);
     if (mode === 'ask') {
       this.history.push({ role: 'user', content: text }, { role: 'assistant', content: finalAnswer });
       this.history = trimHistory(this.history, 12);
     }
-    this.post({ type: 'assistantDone', id: requestId, timestamp: assistantEntry.timestamp });
+    this.post({ type: 'assistantDone', id: requestId, timestamp: assistantEntry.timestamp, sources: assistantEntry.sources });
   }
 
   async handleAgentRequest(text, mode, includeActiveFile, activeEditor, controller, requestId, request) {
     if (!this.agentController) throw new Error('Agent Mode não está disponível nesta sessão.');
     let contextText = '';
+    let contextSources = [];
     if (includeActiveFile && activeEditor?.document?.uri?.scheme === 'file') {
       const context = await buildChatContext(text, this.workspaceIndex, controller.signal, { includeActiveFile: true, editor: activeEditor });
       contextText = context.text ? `Explicit editor/workspace context:\n${context.text}` : '';
+      contextSources = context.sources;
     }
 
     const prompt = buildAgentPrompt(mode, text, contextText);
@@ -322,10 +325,11 @@ class ChatPanel {
       onAction: event => this.post({ type: 'agentProgress', event })
     });
     const answer = result.answer || 'Tarefa concluída.';
+    const sources = mergeSources(contextSources, result.sources);
     this.post({ type: 'assistantDelta', id: requestId, text: answer });
-    const assistantEntry = { role: 'assistant', text: answer, mode, timestamp: Date.now(), request, plan: result.plan, verification: result.verification };
+    const assistantEntry = { role: 'assistant', text: answer, mode, timestamp: Date.now(), request, plan: result.plan, verification: result.verification, sources };
     this.transcript.push(assistantEntry);
-    this.post({ type: 'assistantDone', id: requestId, timestamp: assistantEntry.timestamp });
+    this.post({ type: 'assistantDone', id: requestId, timestamp: assistantEntry.timestamp, sources });
     this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, steps: result.steps });
   }
 
@@ -340,6 +344,7 @@ class ChatPanel {
 async function buildChatContext(question, workspaceIndex, signal, options = {}) {
   const config = getConfig();
   const blocks = [];
+  let sources = [];
   const editor = options.editor || vscode.window.activeTextEditor;
   const activeUri = editor?.document?.uri?.scheme === 'file' ? editor.document.uri : undefined;
   const includeActiveFile = typeof options.includeActiveFile === 'boolean' ? options.includeActiveFile : config.chat.includeEditorContext;
@@ -399,11 +404,12 @@ async function buildChatContext(question, workspaceIndex, signal, options = {}) 
     const extra = Math.min(blocked.size, config.rag.topK);
     let results = await workspaceIndex.search(retrievalHint, { topK: config.rag.topK + extra, signal, excludeUri: includeActiveFile ? activeUri : undefined });
     if (blocked.size) results = results.filter(item => !blocked.has(item.uri?.toString())).slice(0, config.rag.topK);
+    sources = sourcesFromChunks(results);
     const workspaceContext = workspaceIndex.formatForChat(results, config.chat.workspaceContextCharacters);
     if (workspaceContext) blocks.push(workspaceContext);
   }
 
-  return { text: blocks.join('\n\n'), mentionedFiles: mentioned.files, unresolvedMentions: mentioned.unresolved };
+  return { text: blocks.join('\n\n'), mentionedFiles: mentioned.files, unresolvedMentions: mentioned.unresolved, sources };
 }
 
 function escapeAttr(value) {

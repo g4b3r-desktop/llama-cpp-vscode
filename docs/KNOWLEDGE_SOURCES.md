@@ -12,7 +12,7 @@ Knowledge Sources registra diretórios locais de documentação e os disponibili
 
 A view mostra estatísticas reais, estado, avisos e documentos indexados. Os arquivos podem ser abertos diretamente no VS Code. Remover uma fonte elimina apenas seu catálogo e índice; a pasta original permanece intacta.
 
-Para o Agent e Research, a ferramenta search_knowledge_base permite pesquisa explícita e filtragem opcional por source_ids.
+Para o Agent e Research, a ferramenta search_knowledge_base permite pesquisa explícita e filtragem opcional por source_ids. Quando a documentação local é usada, o chat mostra as fontes recuperadas após a resposta, com nome da fonte, arquivo e seção/linhas disponíveis.
 
 ## Formatos e chunking
 
@@ -63,7 +63,7 @@ O botão **Rerank** vem ativado por padrão em novas fontes e permite habilitar/
 
 O botão **Arquivos** abre a lista de documentos encontrados dentro desses filtros. Selecione individualmente os arquivos que poderão alimentar o RAG. A seleção é persistida por fonte; arquivos não selecionados são removidos do índice ativo e não entram na recuperação. Para voltar a usar todos os arquivos compatíveis, marque **Todos os arquivos compatíveis** na lista. A seleção também limita a preservação de documentos durante reindexações parciais.
 
-A interface mostra a fase atual, arquivos lidos, embeddings concluídos, lotes e concorrência. A concorrência é limitada a 4 pelo código e deve ser aumentada gradualmente; em GPUs com pouca VRAM, mantenha 1.
+A interface mostra a fase atual, arquivos lidos, embeddings concluídos, lotes e concorrência. A concorrência é limitada a 8 pelo código e deve ser aumentada gradualmente; em GPUs com pouca VRAM, mantenha 1.
 
 O cache incremental identifica chunks pelo hash do texto efetivamente enviado ao modelo de embeddings, incluindo contexto de fonte/arquivo/seção e fingerprint do modelo. Quando um documento muda, chunks idênticos reutilizam seus vetores e somente os chunks novos ou alterados são re-embedados. O formato JSON/JSONL existente permanece compatível; documentos antigos recebem o hash de chunk durante a leitura e continuam válidos.
 

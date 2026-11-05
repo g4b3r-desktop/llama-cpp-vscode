@@ -10,6 +10,10 @@ header strong { font-size: 13px; }
 .msg { margin: 0 0 10px; padding: 9px 10px; border-radius: 7px; overflow-wrap: anywhere; }
 .msg.user { background: var(--vscode-input-background); white-space: pre-wrap; }
 .msg.assistant { border: 1px solid var(--vscode-panel-border); background: var(--vscode-editor-background); }
+.message-sources { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); font-size: .88em; overflow-wrap: anywhere; }
+.message-sources ul { margin: 5px 0 0; padding-left: 18px; }
+.message-sources li { margin: 3px 0; }
+.message-sources a { color: var(--vscode-textLink-foreground); }
 .msg.error { color: var(--vscode-errorForeground); border: 1px solid var(--vscode-inputValidation-errorBorder); }
 .msg.notice { opacity: .82; border-left: 3px solid var(--vscode-textLink-foreground); padding-left: 8px; }
 .message-meta { margin-top: 6px; font-size: 10px; opacity: .65; text-transform: none; }

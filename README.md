@@ -68,6 +68,12 @@ O modelo também não recebe acesso direto ao terminal, VS Code Diagnostics ou s
 
 Para desenvolvimento use `Ctrl+F5` para abrir um Extension Development Host sem pausar na primeira linha. `F5` inicia uma sessão de depuração.
 
+## Empacotar automaticamente
+
+Cada push em qualquer branch executa as verificações e gera um `.vsix` no workflow **Package VSIX**. Baixe o pacote na seção **Artifacts** da execução correspondente em GitHub Actions. Na branch `main`, um push com mensagem iniciada por `release:` também cria ou atualiza a GitHub Release da versão definida em `package.json`. O workflow pode ser iniciado manualmente pela aba **Actions**; a publicação de Release manual é restrita à `main`.
+
+Para gerar o pacote localmente, execute `npm run package` na raiz do projeto.
+
 ---
 
 # Aba própria na Activity Bar
@@ -568,6 +574,8 @@ Ferramentas:
 - `web_search` — encontra resultados e snippets;
 - `fetch_url` — lê uma fonte HTTP(S) específica;
 - `research_web` — pesquisa e lê múltiplas fontes.
+
+As fontes consultadas são exibidas junto à resposta: URLs clicáveis para pesquisa web e nome/arquivo/seção para documentação local.
 
 Exemplo no painel próprio:
 

@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const { getConfig } = require('../config');
 const { buildChatContext } = require('../chatPanel');
 const { normalizeMode, includeHistoryForMode, buildAgentPrompt, modeLabel } = require('./requestMode');
+const { mergeSources } = require('../chat/sourceReferences');
 
 const VIEW_ID = 'llamaCpp.assistantView';
 
@@ -207,8 +208,9 @@ class AssistantViewProvider {
       if (answer) this.post({ type: 'assistantDelta', id: requestId, text: answer });
     }
     const finalAnswer = answer || '(resposta vazia)';
-    this.post({ type: 'assistantDone', id: requestId });
-    this.transcript.push({ role: 'assistant', text: finalAnswer, mode });
+    const sources = context.sources;
+    this.post({ type: 'assistantDone', id: requestId, sources });
+    this.transcript.push({ role: 'assistant', text: finalAnswer, mode, sources });
     if (mode === 'ask') {
       this.history.push({ role: 'user', content: text }, { role: 'assistant', content: finalAnswer });
       this.history = this.history.slice(-12);
@@ -217,9 +219,11 @@ class AssistantViewProvider {
 
   async handleAgentRequest(text, mode, includeActiveFile, activeEditor, controller, requestId) {
     let contextText = '';
+    let contextSources = [];
     if (includeActiveFile && activeEditor?.document?.uri?.scheme === 'file') {
       const context = await buildChatContext(text, this.workspaceIndex, controller.signal, { includeActiveFile: true, editor: activeEditor });
       contextText = context.text ? `Explicit editor/workspace context:\n${context.text}` : '';
+      contextSources = context.sources;
     }
     const prompt = buildAgentPrompt(mode, text, contextText);
     this.post({ type: 'assistantStart', id: requestId });
@@ -228,9 +232,10 @@ class AssistantViewProvider {
       onAction: event => this.post({ type: 'agentProgress', event })
     });
     const answer = result.answer || 'Tarefa concluída.';
+    const sources = mergeSources(contextSources, result.sources);
     this.post({ type: 'assistantDelta', id: requestId, text: answer });
-    this.post({ type: 'assistantDone', id: requestId });
-    this.transcript.push({ role: 'assistant', text: answer, mode, plan: result.plan, verification: result.verification });
+    this.post({ type: 'assistantDone', id: requestId, sources });
+    this.transcript.push({ role: 'assistant', text: answer, mode, plan: result.plan, verification: result.verification, sources });
     this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, steps: result.steps });
   }
 

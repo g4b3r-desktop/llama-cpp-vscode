@@ -3,3 +3,6 @@ dist/
 *.vsix
 .DS_Store
 test/
+!test/
+test/*
+!test/sourceReferences.test.js
