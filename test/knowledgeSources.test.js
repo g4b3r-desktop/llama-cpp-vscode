@@ -222,3 +222,25 @@ test('embedding queue checkpoints successful work before surfacing a failed batc
   assert.equal(checkpoints[0].completedItems, 1);
   assert.equal(checkpoints[0].completedBatches, 2);
 });
+
+test('embedding queue honors higher concurrency settings for faster indexing', async () => {
+  const items = [1, 2, 3, 4, 5, 6, 7, 8];
+  let active = 0;
+  let maxActive = 0;
+
+  await runEmbeddingBatches(items, {
+    batchSize: 1,
+    concurrency: 8,
+    processBatch: async batch => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      active -= 1;
+      return [batch[0]];
+    },
+    onBatchSuccess: async () => {}
+  });
+
+  assert.equal(maxActive, 8);
+  assert.equal(maxActive, Math.min(8, items.length));
+});

@@ -50,8 +50,9 @@ A alteração da configuração de chunking invalida o parser fingerprint e prov
 - llamaCpp.rag.knowledgeSources.maxCacheMegabytes: limite de tamanho do índice persistido das fontes externas.
 - llamaCpp.rag.knowledgeSources.chunkLines e chunkOverlapLines: chunking por linhas.
 - llamaCpp.rag.knowledgeSources.chunkCharacters e chunkOverlapCharacters: chunking por caracteres/parágrafos.
-- llamaCpp.rag.embedding.batchSize: quantidade de textos por requisição; o padrão conservador é 4.
-- llamaCpp.rag.embedding.concurrency: lotes simultâneos; o padrão é 1 para limitar pressão na VRAM.
+- llamaCpp.rag.embedding.batchSize: quantidade de textos por requisição; o padrão atual é 8.
+- llamaCpp.rag.embedding.concurrency: lotes simultâneos; o padrão é 2 para equilibrar velocidade e consumo de VRAM.
+- llamaCpp.rag.rerank.enabled: habilitado por padrão para documentação, melhorando a ordem de resultados sem depender de um ajuste manual.
 - llamaCpp.rag.embedding.maxCharacters: limite de caracteres por texto enviado ao modelo de embeddings.
 
 Cada fonte possui o botão **Pastas e tipos**. Informe diretórios relativos separados por vírgula (por exemplo, `docs, manual`); vazio inclui todas as pastas. Em seguida, marque em uma lista as extensões que devem ser indexadas (por exemplo, `.html`, `.md`, `.js`, `.ts`). A lista contém somente os formatos textuais suportados pela extensão e permite selecionar vários tipos ao mesmo tempo. Essa configuração é independente para cada Knowledge Source e é aplicada na descoberta de arquivos, indexação e watcher. Se os tipos forem alterados, a seleção individual de arquivos é mantida somente para os caminhos que continuam compatíveis.

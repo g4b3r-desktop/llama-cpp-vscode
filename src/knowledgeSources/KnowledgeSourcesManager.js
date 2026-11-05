@@ -653,8 +653,8 @@ class KnowledgeSourcesManager {
       source.chunks = chunks.length;
       source.vectors = chunks.filter(chunk => chunk.vector?.length).length;
       const pending = vectorEnabled ? chunks.filter(chunk => !chunk.vector?.length) : [];
-      const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 4));
-      const concurrency = Math.max(1, Math.min(4, Number(config.rag.embedding.concurrency || 1)));
+      const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 8));
+      const concurrency = Math.max(1, Math.min(8, Number(config.rag.embedding.concurrency || 2)));
       source.progress = {
         phase: pending.length ? 'embedding' : 'complete',
         current: source.vectors,
@@ -861,8 +861,8 @@ class KnowledgeSourcesManager {
 
     const embeddingStartedAt = Date.now();
     let checkpointPersistenceMs = 0;
-    const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 4));
-    const concurrency = Math.max(1, Math.min(4, Number(config.rag.embedding.concurrency || 1)));
+    const batchSize = Math.max(1, Number(config.rag.embedding.batchSize || 8));
+    const concurrency = Math.max(1, Math.min(8, Number(config.rag.embedding.concurrency || 2)));
     const maxCharacters = Math.max(256, Number(config.rag.embedding.maxCharacters || 4000));
     const checkpointQueue = [];
     await this.ensureEmbeddingCheckpoint(source);

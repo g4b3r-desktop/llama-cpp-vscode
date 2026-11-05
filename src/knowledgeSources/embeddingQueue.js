@@ -9,7 +9,7 @@ async function runEmbeddingBatches(items, options = {}) {
   if (!values.length) return { completedBatches: 0, totalBatches: 0, completedItems: 0, totalItems: 0 };
 
   const batchSize = Math.max(1, Math.min(128, Math.floor(Number(options.batchSize) || 1)));
-  const concurrency = Math.max(1, Math.min(4, Math.floor(Number(options.concurrency) || 1)));
+  const concurrency = Math.max(1, Math.min(8, Math.floor(Number(options.concurrency) || 1)));
   if (typeof options.processBatch !== 'function') throw new TypeError('processBatch callback is required.');
 
   const batches = [];

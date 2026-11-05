@@ -679,7 +679,7 @@ Exemplo:
   "llamaCpp.rag.strategy": "hybrid",
   "llamaCpp.rag.topK": 6,
   "llamaCpp.rag.embedding.enabled": true,
-  "llamaCpp.rag.rerank.enabled": false
+  "llamaCpp.rag.rerank.enabled": true
 }
 ```
 
