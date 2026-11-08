@@ -21,13 +21,14 @@ function registerNativeChat(context, client, workspaceIndex, agentController) {
         const result = await agentController.run(agentPrompt, {
           model: modelOverride,
           signal: controller.signal,
+          webResearchQuery: command === 'research' ? request.prompt : undefined,
           onAction: event => {
             if (typeof stream.progress !== 'function') return;
             stream.progress(event.message);
           }
         });
-        stream.markdown((result.answer || 'Tarefa concluída.') + formatSourcesMarkdown(result.sources));
-        return { metadata: { command, model: modelOverride || defaultModel(), agentSessionId: result.sessionId, steps: result.steps, plan: result.plan, verification: result.verification, sources: result.sources } };
+        stream.markdown((result.answer || 'Tarefa concluída.') + formatSourcesMarkdown(result.sources, command === 'research', result.webResearchStatus));
+        return { metadata: { command, model: modelOverride || defaultModel(), agentSessionId: result.sessionId, steps: result.steps, plan: result.plan, verification: result.verification, sources: result.sources, webResearchStatus: result.webResearchStatus } };
       }
       const config = getConfig();
       const commandPrompt = commandInstruction(command);

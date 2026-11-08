@@ -83,12 +83,24 @@
     return div;
   }
 
-  function createSources(sources) {
-    if (!Array.isArray(sources) || !sources.length) return undefined;
+  function createSources(sources, showEmpty = false, researchStatus) {
+    if ((!Array.isArray(sources) || !sources.length) && !showEmpty) return undefined;
     const section = document.createElement('section');
     section.className = 'message-sources';
     const heading = document.createElement('strong');
     heading.textContent = 'Fontes';
+    const statusText = formatResearchStatus(researchStatus);
+    if (!Array.isArray(sources) || !sources.length) {
+      const empty = document.createElement('p');
+      empty.textContent = statusText || 'Nenhuma fonte foi retornada com sucesso pelas ferramentas. URLs citadas no texto não foram verificadas pela extensão.';
+      section.append(heading, empty);
+      return section;
+    }
+    if (statusText) {
+      const status = document.createElement('p');
+      status.textContent = statusText;
+      section.appendChild(status);
+    }
     const list = document.createElement('ul');
     for (const source of sources) {
       const item = document.createElement('li');
@@ -113,14 +125,23 @@
     return section;
   }
 
-  function addAssistant(id) {
+  function formatResearchStatus(status) {
+    if (!status || typeof status !== 'object') return '';
+    const provider = status.provider === 'searxng' ? 'SearXNG' : status.provider === 'brave' ? 'Brave Search' : 'provedor web';
+    if (status.error) return `Pesquisa falhou (${provider}): ${status.error}. Confira llamaCpp.agent.web.provider, searxngBaseUrl ou a chave da Brave.`;
+    if (status.searchResults === 0) return `${provider} não retornou resultados. Confira as configurações llamaCpp.agent.web.`;
+    if (status.fetchedSources === 0) return `A busca retornou ${status.searchResults} link(s), mas nenhuma página pôde ser lida; os links abaixo vieram do provedor de busca.`;
+    return '';
+  }
+
+  function addAssistant(id, request) {
     const div = document.createElement('div');
     div.className = 'msg assistant';
     const body = document.createElement('div');
     body.className = 'markdown-body';
     div.appendChild(body);
     messages.appendChild(div);
-    assistantNodes.set(id, { node: body, container: div, raw: '' });
+    assistantNodes.set(id, { node: body, container: div, raw: '', request });
     scrollBottom();
   }
 
@@ -200,21 +221,21 @@
         if (entry.role === 'user') add('user', entry.text || '', false, entry.meta || entry.mode || '');
         else {
           const assistant = add('assistant', entry.text || '', true);
-          const sources = createSources(entry.sources);
+          const sources = createSources(entry.sources, entry.mode === 'research', entry.webResearchStatus);
           if (sources) assistant.appendChild(sources);
         }
       }
     } else if (msg.type === 'user') {
       add('user', msg.text || '', false, `${String(msg.mode || '').toUpperCase()}${msg.activeFilename && msg.includeActiveFile ? ` · ${msg.activeFilename}` : ''}`);
       if (msg.mode === 'agent' || msg.mode === 'research') { progress.classList.remove('hidden'); progress.textContent = 'Preparando plano…'; }
-    } else if (msg.type === 'assistantStart') addAssistant(msg.id);
+    } else if (msg.type === 'assistantStart') addAssistant(msg.id, msg.request || { mode: msg.mode });
     else if (msg.type === 'assistantDelta') {
       const entry = assistantNodes.get(msg.id);
       if (entry) { entry.raw += msg.text || ''; entry.node.innerHTML = renderMarkdown(entry.raw); scrollBottom(); }
     } else if (msg.type === 'assistantDone') {
       const assistant = assistantNodes.get(msg.id);
       if (assistant) {
-        const sources = createSources(msg.sources);
+        const sources = createSources(msg.sources, assistant.request?.mode === 'research', msg.webResearchStatus);
         if (sources) assistant.container.appendChild(sources);
       }
       assistantNodes.delete(msg.id);

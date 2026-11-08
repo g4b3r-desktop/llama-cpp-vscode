@@ -322,14 +322,15 @@ class ChatPanel {
     this.post({ type: 'assistantStart', id: requestId, request, timestamp: Date.now() });
     const result = await this.agentController.run(prompt, {
       signal: controller.signal,
+      webResearchQuery: mode === 'research' ? text : undefined,
       onAction: event => this.post({ type: 'agentProgress', event })
     });
     const answer = result.answer || 'Tarefa concluída.';
     const sources = mergeSources(contextSources, result.sources);
     this.post({ type: 'assistantDelta', id: requestId, text: answer });
-    const assistantEntry = { role: 'assistant', text: answer, mode, timestamp: Date.now(), request, plan: result.plan, verification: result.verification, sources };
+    const assistantEntry = { role: 'assistant', text: answer, mode, timestamp: Date.now(), request, plan: result.plan, verification: result.verification, sources, webResearchStatus: result.webResearchStatus };
     this.transcript.push(assistantEntry);
-    this.post({ type: 'assistantDone', id: requestId, timestamp: assistantEntry.timestamp, sources });
+    this.post({ type: 'assistantDone', id: requestId, timestamp: assistantEntry.timestamp, sources, webResearchStatus: result.webResearchStatus });
     this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, steps: result.steps });
   }
 

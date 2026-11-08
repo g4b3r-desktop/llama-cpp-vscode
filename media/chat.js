@@ -182,12 +182,24 @@
     return footer;
   }
 
-  function createSources(sources) {
-    if (!Array.isArray(sources) || !sources.length) return undefined;
+  function createSources(sources, showEmpty = false, researchStatus) {
+    if ((!Array.isArray(sources) || !sources.length) && !showEmpty) return undefined;
     const section = document.createElement('section');
     section.className = 'message-sources';
     const heading = document.createElement('strong');
     heading.textContent = 'Fontes';
+    const statusText = formatResearchStatus(researchStatus);
+    if (!Array.isArray(sources) || !sources.length) {
+      const empty = document.createElement('p');
+      empty.textContent = statusText || 'Nenhuma fonte foi retornada com sucesso pelas ferramentas. URLs citadas no texto não foram verificadas pela extensão.';
+      section.append(heading, empty);
+      return section;
+    }
+    if (statusText) {
+      const status = document.createElement('p');
+      status.textContent = statusText;
+      section.appendChild(status);
+    }
     const list = document.createElement('ul');
     for (const source of sources) {
       const item = document.createElement('li');
@@ -210,6 +222,15 @@
     if (!list.childElementCount) return undefined;
     section.append(heading, list);
     return section;
+  }
+
+  function formatResearchStatus(status) {
+    if (!status || typeof status !== 'object') return '';
+    const provider = status.provider === 'searxng' ? 'SearXNG' : status.provider === 'brave' ? 'Brave Search' : 'provedor web';
+    if (status.error) return `Pesquisa falhou (${provider}): ${status.error}. Confira llamaCpp.agent.web.provider, searxngBaseUrl ou a chave da Brave.`;
+    if (status.searchResults === 0) return `${provider} não retornou resultados. Confira as configurações llamaCpp.agent.web.`;
+    if (status.fetchedSources === 0) return `A busca retornou ${status.searchResults} link(s), mas nenhuma página pôde ser lida; os links abaixo vieram do provedor de busca.`;
+    return '';
   }
 
   function createMessage(entry) {
@@ -236,7 +257,7 @@
     else body.textContent = entry.text || '';
 
     article.append(header, body);
-    const sources = createSources(entry.sources);
+    const sources = createSources(entry.sources, entry.mode === 'research', entry.webResearchStatus);
     if (sources) article.appendChild(sources);
     article.appendChild(createActions(entry));
     entryStore.set(id, entry);
@@ -271,17 +292,17 @@
     scrollBottom();
   }
 
-  function finishAssistant(id, timestamp, aborted, sources = []) {
+  function finishAssistant(id, timestamp, aborted, sources = [], webResearchStatus) {
     const stream = assistantNodes.get(id);
     if (!stream) return;
     assistantNodes.delete(id);
     stream.article.classList.remove('streaming');
     stream.body.innerHTML = renderMarkdown(stream.raw || (aborted ? '_Resposta interrompida._' : ''));
-    const entry = { role: 'assistant', text: stream.raw || (aborted ? 'Resposta interrompida.' : ''), mode: stream.request?.mode || 'ask', timestamp: timestamp || Date.now(), request: stream.request, sources };
+    const entry = { role: 'assistant', text: stream.raw || (aborted ? 'Resposta interrompida.' : ''), mode: stream.request?.mode || 'ask', timestamp: timestamp || Date.now(), request: stream.request, sources, webResearchStatus };
     const entryId = `entry-${++entrySerial}`;
     stream.article.dataset.entryId = entryId;
     entryStore.set(entryId, entry);
-    const sourceSection = createSources(sources);
+    const sourceSection = createSources(sources, entry.mode === 'research', webResearchStatus);
     if (sourceSection) stream.article.appendChild(sourceSection);
     stream.article.appendChild(createActions(entry));
     scrollBottom();
@@ -478,7 +499,7 @@
         scrollBottom();
       }
     } else if (msg.type === 'assistantDone') {
-      finishAssistant(msg.id, msg.timestamp, false, msg.sources);
+      finishAssistant(msg.id, msg.timestamp, false, msg.sources, msg.webResearchStatus);
     } else if (msg.type === 'assistantAbort') {
       finishAssistant(msg.id, Date.now(), true);
     } else if (msg.type === 'removeLastExchange') {

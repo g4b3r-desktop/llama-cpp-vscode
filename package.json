@@ -135,7 +135,7 @@
         "llamaCpp.agent.terminalTimeoutMs": {"type": "number", "default": 120000, "minimum": 1000},
         "llamaCpp.agent.maxTerminalOutputCharacters": {"type": "number", "default": 40000, "minimum": 1000},
         "llamaCpp.agent.maxToolResultCharacters": {"type": "number", "default": 30000, "minimum": 1000},
-        "llamaCpp.agent.planning.enabled": {"type": "boolean", "default": true, "description": "Create a short public operational plan before Agent Mode starts executing tools."},
+        "llamaCpp.agent.planning.enabled": {"type": "boolean", "default": true, "description": "Show a public plan before Agent Mode executes. When disabled, execute the request directly without generating or displaying a plan."},
         "llamaCpp.agent.planning.maxPlanSteps": {"type": "number", "default": 6, "minimum": 2, "maximum": 10, "description": "Maximum number of public plan steps generated before execution."},
         "llamaCpp.agent.planning.requireVerification": {"type": "boolean", "default": true, "description": "After workspace changes, require fresh diagnostics and request a relevant test/build/lint/typecheck command before completion."},
         "llamaCpp.agent.planning.showFinalPlan": {"type": "boolean", "default": true, "description": "Include the completed public plan and statuses in the final Agent Mode response."},

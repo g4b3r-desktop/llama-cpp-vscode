@@ -42,9 +42,13 @@ function mergeSources(...groups) {
   return uniqueSources(groups.flatMap(group => Array.isArray(group) ? group : []));
 }
 
-function formatSourcesMarkdown(sources) {
+function formatSourcesMarkdown(sources, showEmpty = false, webResearchStatus) {
   const items = uniqueSources(Array.isArray(sources) ? sources : []);
-  if (!items.length) return '';
+  const statusText = formatWebResearchStatus(webResearchStatus);
+  if (!items.length) {
+    if (!showEmpty) return statusText ? `\n\n> ${statusText}` : '';
+    return `\n\n### Fontes\n${statusText || 'Nenhuma fonte foi retornada com sucesso pelas ferramentas. URLs citadas no texto não foram verificadas pela extensão.'}`;
+  }
   const lines = items.map(source => {
     if (source.type === 'web') {
       const url = encodeURI(source.url).replace(/\(/g, '%28').replace(/\)/g, '%29');
@@ -55,7 +59,22 @@ function formatSourcesMarkdown(sources) {
       .join(' · ');
     return `- **${escapeMarkdown(source.source)}**${location ? ` — ${escapeMarkdown(location)}` : ''}`;
   });
-  return `\n\n### Fontes\n${lines.join('\n')}`;
+  return `\n\n### Fontes\n${statusText ? `${statusText}\n\n` : ''}${lines.join('\n')}`;
+}
+
+function formatWebResearchStatus(status) {
+  if (!status || typeof status !== 'object') return '';
+  const provider = status.provider === 'searxng' ? 'SearXNG' : status.provider === 'brave' ? 'Brave Search' : 'provedor web';
+  if (status.error) {
+    return `Pesquisa web falhou (${provider}): ${String(status.error).replace(/\r?\n/g, ' ')}. Verifique \`llamaCpp.agent.web.provider\`, \`llamaCpp.agent.web.searxngBaseUrl\` ou a chave da Brave.`;
+  }
+  if (status.searchResults === 0) {
+    return `${provider} não retornou resultados. Verifique a configuração do provedor em \`llamaCpp.agent.web\`.`;
+  }
+  if (status.fetchedSources === 0) {
+    return `A busca retornou ${status.searchResults} link(s), mas nenhuma página pôde ser lida; os links abaixo vieram do provedor de busca.`;
+  }
+  return '';
 }
 
 function webSource(item) {
@@ -100,4 +119,4 @@ function escapeMarkdown(value) {
   return String(value || '').replace(/[\\`*_{}[\]()#+.!|>]/g, '\\$&').replace(/\r?\n/g, ' ');
 }
 
-module.exports = { sourcesFromChunks, sourcesFromToolResult, mergeSources, formatSourcesMarkdown };
+module.exports = { sourcesFromChunks, sourcesFromToolResult, mergeSources, formatSourcesMarkdown, formatWebResearchStatus };

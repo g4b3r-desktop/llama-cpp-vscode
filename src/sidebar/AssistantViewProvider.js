@@ -199,7 +199,7 @@ class AssistantViewProvider {
       ...(includeHistory ? this.history : []),
       { role: 'user', content: userMessage }
     ];
-    this.post({ type: 'assistantStart', id: requestId });
+    this.post({ type: 'assistantStart', id: requestId, mode });
     let answer = '';
     if (config.chat.streaming) {
       answer = await this.client.chatStream(messages, controller.signal, delta => this.post({ type: 'assistantDelta', id: requestId, text: delta }));
@@ -226,16 +226,17 @@ class AssistantViewProvider {
       contextSources = context.sources;
     }
     const prompt = buildAgentPrompt(mode, text, contextText);
-    this.post({ type: 'assistantStart', id: requestId });
+    this.post({ type: 'assistantStart', id: requestId, mode });
     const result = await this.agentController.run(prompt, {
       signal: controller.signal,
+      webResearchQuery: mode === 'research' ? text : undefined,
       onAction: event => this.post({ type: 'agentProgress', event })
     });
     const answer = result.answer || 'Tarefa concluída.';
     const sources = mergeSources(contextSources, result.sources);
     this.post({ type: 'assistantDelta', id: requestId, text: answer });
-    this.post({ type: 'assistantDone', id: requestId, sources });
-    this.transcript.push({ role: 'assistant', text: answer, mode, plan: result.plan, verification: result.verification, sources });
+    this.post({ type: 'assistantDone', id: requestId, sources, webResearchStatus: result.webResearchStatus });
+    this.transcript.push({ role: 'assistant', text: answer, mode, plan: result.plan, verification: result.verification, sources, webResearchStatus: result.webResearchStatus });
     this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, steps: result.steps });
   }
 

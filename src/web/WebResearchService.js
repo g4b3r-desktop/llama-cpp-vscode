@@ -27,8 +27,15 @@ class WebResearchService {
     const count = clampInt(options.maxResults || config.maxResults, 1, 20);
     const provider = await this.resolveProvider(config);
     let results;
-    if (provider === 'brave') results = await this.searchBrave(q, count, options, config, signal);
-    else results = await this.searchSearxng(q, count, options, config, signal);
+    try {
+      if (provider === 'brave') results = await this.searchBrave(q, count, options, config, signal);
+      else results = await this.searchSearxng(q, count, options, config, signal);
+    } catch (error) {
+      if (signal?.aborted || error?.provider) throw error;
+      const annotated = new Error(error instanceof Error ? error.message : String(error));
+      annotated.provider = provider;
+      throw annotated;
+    }
     const filtered = results.filter(item => isAllowedResult(item.url, config));
     this.output?.appendLine(`[agent:web_search] provider=${provider} query=${JSON.stringify(q)} results=${filtered.length}`);
     return { query: q, provider, results: filtered.slice(0, count) };
@@ -104,7 +111,12 @@ class WebResearchService {
     url.searchParams.set('safesearch', 'moderate');
     const language = String(options.language || config.language || '').trim();
     if (language) url.searchParams.set('search_lang', language.toLowerCase());
-    const data = await fetchJson(url.toString(), { 'X-Subscription-Token': key, Accept: 'application/json' }, config.timeoutMs, signal);
+    let data;
+    try {
+      data = await fetchJson(url.toString(), { 'X-Subscription-Token': key, Accept: 'application/json' }, config.timeoutMs, signal);
+    } catch (error) {
+      throw describeSearchError('brave', url, error, signal);
+    }
     return normalizeBraveResults(data);
   }
 
@@ -116,9 +128,23 @@ class WebResearchService {
     url.searchParams.set('safesearch', '1');
     const language = String(options.language || config.language || '').trim();
     if (language) url.searchParams.set('language', language);
-    const data = await fetchJson(url.toString(), { Accept: 'application/json' }, config.timeoutMs, signal);
+    let data;
+    try {
+      data = await fetchJson(url.toString(), { Accept: 'application/json' }, config.timeoutMs, signal);
+    } catch (error) {
+      throw describeSearchError('searxng', url, error, signal);
+    }
     return normalizeSearxResults(data).slice(0, count);
   }
+}
+
+function describeSearchError(provider, endpoint, error, signal) {
+  if (signal?.aborted) return error;
+  const name = provider === 'brave' ? 'Brave Search' : 'SearXNG';
+  const detail = error instanceof Error ? error.message : String(error);
+  const result = new Error(`Could not reach ${name} at ${endpoint.origin}${endpoint.pathname}: ${detail}`);
+  result.provider = provider;
+  return result;
 }
 
 function webConfig() {

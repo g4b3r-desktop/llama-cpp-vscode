@@ -234,7 +234,7 @@ Autocomplete e embeddings por OpenAI ficam desligados por padrão:
 }
 ```
 
-O Agent Mode com planejamento usa uma chamada adicional de modelo para criar o plano público antes de executar ferramentas. Se quiser evitar essa chamada, desative `llamaCpp.agent.planning.enabled`.
+O Agent Mode permite escolher se deve mostrar um plano público antes de executar ferramentas. Para alternar, abra **Configurações** do VS Code e procure por `llamaCpp.agent.planning.enabled`: ligado, o agente cria e exibe um plano antes de executar; desligado, ele executa a solicitação diretamente, sem gerar ou mostrar etapas. A validação após alterações continua sendo controlada separadamente por `llamaCpp.agent.planning.requireVerification`.
 
 ---
 
@@ -489,7 +489,7 @@ Depois vem o resumo final do modelo com alterações e validação.
 
 ### `llamaCpp.agent.planning.enabled`
 
-Quando `true`, faz uma chamada separada para criar o plano antes da execução. Quando `false`, usa um plano mínimo de fallback sem uma chamada extra de planejamento.
+Quando `true` (padrão), faz uma chamada separada para criar e exibir o plano antes da execução. Quando `false`, executa a solicitação diretamente, sem chamada de planejamento, eventos ou etapas de plano na resposta.
 
 ### `llamaCpp.agent.planning.maxPlanSteps`
 
@@ -575,7 +575,7 @@ Ferramentas:
 - `fetch_url` — lê uma fonte HTTP(S) específica;
 - `research_web` — pesquisa e lê múltiplas fontes.
 
-As fontes consultadas são exibidas junto à resposta: URLs clicáveis para pesquisa web e nome/arquivo/seção para documentação local.
+As fontes consultadas são exibidas junto à resposta: URLs clicáveis retornadas pelas ferramentas web e nome/arquivo/seção para documentação local. Se nenhuma fonte for recuperada, o painel informa que links no texto não foram verificados pela extensão.
 
 Exemplo no painel próprio:
 
@@ -597,12 +597,53 @@ Llama.cpp: Set Web Search API Key
 
 ## SearXNG
 
-```json
-{
-  "llamaCpp.agent.web.provider": "searxng",
-  "llamaCpp.agent.web.searxngBaseUrl": "http://127.0.0.1:8888"
-}
-```
+O provider SearXNG exige uma instância acessível pelo Extension Host. O endereço `127.0.0.1:8888` abaixo é a máquina onde o host da extensão está rodando; se o VS Code estiver em WSL, SSH ou container, configure um endereço acessível a partir desse ambiente.
+
+### Iniciar com Docker Compose
+
+Siga o [guia oficial de instalação do SearXNG com Docker](https://docs.searxng.org/admin/installation-docker.html) e baixe os arquivos `docker-compose.yml` e `.env.example` do diretório [`container` do projeto SearXNG](https://github.com/searxng/searxng/tree/master/container). Na pasta desses arquivos:
+
+1. Copie `.env.example` para `.env` e defina a porta e o endereço local:
+
+   ```env
+   SEARXNG_HOST=127.0.0.1
+   SEARXNG_PORT=8888
+   ```
+
+2. Crie `core-config/settings.yml`. O endpoint JSON precisa estar habilitado; o padrão do SearXNG permite somente HTML:
+
+   ```yaml
+   use_default_settings: true
+   server:
+     secret_key: "COLOQUE_AQUI_UM_SEGREDO_ALEATORIO"
+   search:
+     formats:
+       - html
+       - json
+   ```
+
+   Gere um segredo localmente com `openssl rand -hex 32` e substitua o valor de exemplo. Não publique nem versione seu segredo.
+
+3. Inicie o serviço e teste a API:
+
+   ```bash
+   docker compose up -d
+   curl 'http://127.0.0.1:8888/search?q=Three.js&format=json'
+   ```
+
+   A resposta deve ser JSON com um campo `results`. Consulte os logs com `docker compose logs -f core` e pare o serviço com `docker compose down`.
+
+4. Configure a extensão em `settings.json` do VS Code:
+
+   ```json
+   {
+     "llamaCpp.agent.web.enabled": true,
+     "llamaCpp.agent.web.provider": "searxng",
+     "llamaCpp.agent.web.searxngBaseUrl": "http://127.0.0.1:8888",
+     "llamaCpp.agent.web.maxResults": 8,
+     "llamaCpp.agent.web.maxSources": 5
+   }
+   ```
 
 Configuração típica:
 
