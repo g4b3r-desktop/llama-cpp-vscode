@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.0
+- Agent Mode pode executar automaticamente arquivos alterados, analisar resultados reais e tentar corrigir erros dentro do limite configurado.
+- Adicionadas detecção de runtime e seleção de comandos de execução/verificação para JavaScript, TypeScript, Python, HTML, PHP, Go e Shell.
+- Execuções automáticas respeitam Workspace Trust, aprovação explícita, timeout, cancelamento e limite de tentativas; previews locais têm ciclo de vida gerenciado.
+- O painel Agent agora apresenta comando, duração, código de saída, saídas, diagnostics e estado final da execução.
+- Adicionadas configurações `llamaCpp.agent.execution.autoRunAfterChanges`, `maxRepairAttempts` e `timeoutMs`.
+- Adicionados testes para execução, reparo automático, timeout, cancelamento, permissões e invalidação de verificações.
+
 ## 0.14.0
 - Classic Chat totalmente redesenhado com visual moderno integrado às cores/variáveis do VS Code.
 - Adicionados modos **Ask**, **Fresh**, **Research** e **Agent** diretamente no Classic Chat.

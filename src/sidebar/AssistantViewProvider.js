@@ -236,8 +236,8 @@ class AssistantViewProvider {
     const sources = mergeSources(contextSources, result.sources);
     this.post({ type: 'assistantDelta', id: requestId, text: answer });
     this.post({ type: 'assistantDone', id: requestId, sources, webResearchStatus: result.webResearchStatus });
-    this.transcript.push({ role: 'assistant', text: answer, mode, plan: result.plan, verification: result.verification, sources, webResearchStatus: result.webResearchStatus });
-    this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, steps: result.steps });
+    this.transcript.push({ role: 'assistant', text: answer, mode, plan: result.plan, verification: result.verification, execution: result.execution, sources, webResearchStatus: result.webResearchStatus });
+    this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, execution: result.execution, steps: result.steps });
   }
 
   async reindex() {

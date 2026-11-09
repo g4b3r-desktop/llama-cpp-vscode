@@ -448,7 +448,7 @@ Se algum arquivo foi alterado, verificações anteriores são invalidadas.
 Antes de concluir, a extensão exige uma nova fase de verificação:
 
 - coleta `get_errors` depois das últimas alterações;
-- solicita teste/build/lint/typecheck relevante via `run_terminal` quando aplicável;
+- considera teste/build/lint/typecheck aprovado somente quando o processo termina com `exitCode` zero e sem timeout;
 - se houver novas alterações durante a correção, a validação precisa ser feita novamente;
 - se não existir comando aplicável, o modelo precisa declarar isso em vez de fingir que testes rodaram.
 
@@ -502,6 +502,24 @@ Quando `true`, alterações no workspace exigem diagnostics atualizados e uma te
 ### `llamaCpp.agent.planning.showFinalPlan`
 
 Inclui o estado final do plano na resposta do agente.
+
+## Execução e autocorreção
+
+Por padrão, o Agent não executa automaticamente arquivos alterados. Para habilitar o ciclo **executar → observar → corrigir → executar novamente**:
+
+```json
+{
+  "llamaCpp.agent.execution.autoRunAfterChanges": true,
+  "llamaCpp.agent.execution.maxRepairAttempts": 3,
+  "llamaCpp.agent.execution.timeoutMs": 120000
+}
+```
+
+O host identifica JavaScript/Node.js, TypeScript, Python, HTML, PHP, Go e Shell. Scripts de verificação já declarados no `package.json` têm prioridade quando aplicáveis; dependências não são instaladas automaticamente. Arquivos não-textuais e linguagens sem runtime disponível não são executados.
+
+Cada execução automática ainda exige aprovação explícita de terminal e Workspace Trust. Comando, tempo, código de saída, `stdout`, `stderr`, diagnostics e tentativas de correção aparecem no painel Agent. Timeout, cancelamento, falta de progresso e limite de tentativas impedem que o agente informe sucesso sem nova evidência.
+
+Arquivos HTML podem ser servidos por um processo local gerenciado, vinculado somente a `127.0.0.1`; o VS Code abre a visualização no navegador padrão. O servidor é encerrado ao iniciar outra tarefa Agent ou ao desativar a extensão. Para encerrá-lo antes, execute **Llama.cpp: Stop Agent Preview Server**.
 
 ## Ferramentas principais
 

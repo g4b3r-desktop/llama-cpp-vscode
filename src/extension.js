@@ -45,6 +45,7 @@ function activate(context) {
     vscode.commands.registerCommand('llamaCpp.openClassicChat', () => classicChat.open()),
     vscode.commands.registerCommand('llamaCpp.runAgent', () => assistantView.focus('', 'agent')),
     vscode.commands.registerCommand('llamaCpp.rollbackAgent', async () => { try { const result = await agentController.rollback(); vscode.window.showInformationMessage(`llama.cpp Agent: rollback concluído (${result.changes} alteração(ões)).`); } catch (error) { vscode.window.showErrorMessage(`llama.cpp Agent: ${error instanceof Error ? error.message : String(error)}`); } }),
+    vscode.commands.registerCommand('llamaCpp.stopAgentPreview', async () => { try { const stopped = await agentController.stopPreview(); vscode.window.showInformationMessage(stopped ? 'Servidor de preview do Agent encerrado.' : 'Nenhum servidor de preview do Agent está ativo.'); } catch (error) { vscode.window.showErrorMessage(`llama.cpp Agent: ${error instanceof Error ? error.message : String(error)}`); } }),
     vscode.commands.registerCommand('llamaCpp.setWebSearchApiKey', () => agentController.setWebSearchApiKey()),
     vscode.commands.registerCommand('llamaCpp.clearWebSearchApiKey', () => agentController.clearWebSearchApiKey()),
     vscode.commands.registerCommand('llamaCpp.openInlineStatusMenu', () => inlineSuggestions.openMenu()),

@@ -259,6 +259,7 @@
     article.append(header, body);
     const sources = createSources(entry.sources, entry.mode === 'research', entry.webResearchStatus);
     if (sources) article.appendChild(sources);
+    if (entry.execution) article.appendChild(createExecutionDetails(entry.execution));
     article.appendChild(createActions(entry));
     entryStore.set(id, entry);
     messages.appendChild(article);
@@ -416,6 +417,53 @@
     progress.classList.remove('hidden');
   }
 
+  function createExecutionDetails(report) {
+    const details = document.createElement('details');
+    details.className = `execution-report ${String(report.finalStatus || report.status || 'failed').toLowerCase()}`;
+    const summary = document.createElement('summary');
+    summary.textContent = `Execução ${report.finalStatus || report.status || 'FAILED'} · ${report.path || 'arquivo'}`;
+    details.appendChild(summary);
+    const rows = [
+      ['Comando', report.command],
+      ['Tempo', Number.isFinite(report.durationMs) ? `${report.durationMs} ms` : '—'],
+      ['Código de saída', report.exitCode === null || report.exitCode === undefined ? '—' : String(report.exitCode)],
+      ['Correções', String(report.repairAttempts || 0)],
+      ['Estado', report.finalStatus || report.status || 'FAILED']
+    ];
+    for (const [label, value] of rows) {
+      if (!value) continue;
+      const row = document.createElement('div');
+      row.className = 'execution-meta';
+      row.textContent = `${label}: ${value}`;
+      details.appendChild(row);
+    }
+    for (const [label, value] of [['stdout', report.stdout], ['stderr', report.stderr]]) {
+      if (!value) continue;
+      const heading = document.createElement('strong');
+      heading.textContent = label;
+      const output = document.createElement('pre');
+      output.textContent = value;
+      details.append(heading, output);
+    }
+    for (const diagnostic of report.diagnostics || []) {
+      const item = document.createElement('div');
+      item.className = 'execution-error';
+      item.textContent = `${diagnostic.file || diagnostic.path || 'Erro'}${diagnostic.line ? `:${diagnostic.line}${diagnostic.column ? `:${diagnostic.column}` : ''}` : ''}: ${diagnostic.message || ''}`;
+      details.appendChild(item);
+    }
+    return details;
+  }
+
+  function renderExecution(report, message) {
+    if (!report) return;
+    progress.replaceChildren();
+    const heading = document.createElement('div');
+    heading.className = 'progress-title';
+    heading.textContent = message || `Execução ${report.finalStatus || report.status || 'em andamento'}`;
+    progress.append(heading, createExecutionDetails(report));
+    progress.classList.remove('hidden');
+  }
+
   modeButtons.forEach(button => button.addEventListener('click', () => setMode(button.dataset.mode || 'ask')));
   sendButton.addEventListener('click', () => sendRequest());
   cancelButton.addEventListener('click', () => vscode.postMessage({ type: 'cancel' }));
@@ -507,12 +555,14 @@
     } else if (msg.type === 'agentProgress') {
       const data = msg.event || {};
       if (data.kind === 'plan') renderPlan(data.plan, data.phase);
+      else if (data.kind === 'execution') renderExecution(data.execution, data.message);
       else {
         status.textContent = data.message || 'Executando…';
         progress.classList.remove('hidden');
       }
     } else if (msg.type === 'agentResult') {
       if (msg.plan) renderPlan(msg.plan, 'done');
+      if (msg.execution) renderExecution(msg.execution, `Estado final: ${msg.execution.finalStatus || msg.execution.status}`);
       const verification = msg.verification || {};
       status.textContent = verification.workspaceChanged
         ? `Diagnostics ${verification.diagnostics ? '✓' : '—'} · testes/comando ${verification.command ? '✓' : '—'}`

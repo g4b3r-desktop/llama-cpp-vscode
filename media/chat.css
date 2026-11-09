@@ -72,6 +72,13 @@ button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 1px
 .plan-step.running { color: var(--vscode-foreground); font-weight: 600; }
 .plan-step.completed .plan-icon { color: var(--vscode-testing-iconPassed); }
 .plan-step.failed .plan-icon { color: var(--vscode-testing-iconFailed); }
+.execution-report { margin-top: 6px; padding: 7px; border: 1px solid var(--vscode-panel-border); border-radius: 6px; font-size: 11px; }
+.execution-report.success { border-color: var(--vscode-testing-iconPassed); }
+.execution-report.failed, .execution-report.timeout, .execution-report.cancelled { border-color: var(--vscode-testing-iconFailed); }
+.execution-report summary { cursor: pointer; font-weight: 650; }
+.execution-meta { margin-top: 4px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.execution-report pre { max-height: 180px; overflow: auto; margin: 4px 0 7px; padding: 6px; background: var(--vscode-textCodeBlock-background); white-space: pre-wrap; overflow-wrap: anywhere; }
+.execution-error { margin-top: 5px; color: var(--vscode-errorForeground); overflow-wrap: anywhere; }
 
 #messages { overflow: auto; padding: 24px max(18px, calc((100% - 900px) / 2)); scroll-behavior: smooth; }
 .empty-state { max-width: 720px; margin: 8vh auto 0; text-align: center; color: var(--vscode-descriptionForeground); }

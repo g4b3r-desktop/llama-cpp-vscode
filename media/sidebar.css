@@ -39,6 +39,13 @@ button:disabled { opacity: .5; cursor: default; }
 .plan-step.running { opacity: 1; font-weight: 600; }
 .plan-step.completed { opacity: .86; }
 .plan-step.failed { color: var(--vscode-errorForeground); opacity: 1; }
+.execution-report { margin-top: 6px; padding: 6px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; font-size: 10px; }
+.execution-report.success { border-color: var(--vscode-testing-iconPassed); }
+.execution-report.failed, .execution-report.timeout, .execution-report.cancelled { border-color: var(--vscode-testing-iconFailed); }
+.execution-report summary { cursor: pointer; font-weight: 650; }
+.execution-meta { margin-top: 4px; color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+.execution-report pre { max-height: 150px; overflow: auto; margin: 4px 0 7px; padding: 5px; background: var(--vscode-textCodeBlock-background); white-space: pre-wrap; overflow-wrap: anywhere; }
+.execution-error { margin-top: 4px; color: var(--vscode-errorForeground); overflow-wrap: anywhere; }
 .markdown-body { line-height: 1.5; }
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body > :last-child { margin-bottom: 0; }

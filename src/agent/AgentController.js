@@ -13,13 +13,13 @@ const {getConfig}=require('../config');
 const {sourcesFromToolResult,mergeSources}=require('../chat/sourceReferences');
 
 class AgentController{
-  constructor(context,client,output,workspaceIndex){this.context=context;this.client=client;this.output=output;this.workspaceIndex=workspaceIndex;this.activeRunner=undefined;this.web=new WebResearchService(context.secrets,output);}
+  constructor(context,client,output,workspaceIndex){this.context=context;this.client=client;this.output=output;this.workspaceIndex=workspaceIndex;this.activeRunner=undefined;this.terminalService=undefined;this.web=new WebResearchService(context.secrets,output);}
   async run(prompt,options={}){
     if(this.activeRunner)throw new Error('Another llama.cpp agent task is already running. Finish or cancel it before starting a new Agent/Research task.');
     const config=getConfig();
     if(!config.agent.enabled)throw new Error('Agent mode is disabled in llama.cpp Assistant settings.');
     const rootUri=selectWorkspaceRoot();if(!rootUri)throw new Error('Open a workspace folder before running the agent.');if(rootUri.scheme!=='file')throw new Error('Agent mode currently requires a file-based workspace.');
-    const permissions=new PermissionService();const history=new AgentHistory(this.context,permissions,this.output);const workspace=new WorkspaceService(rootUri,permissions,history,this.output);const terminal=new TerminalService(rootUri.fsPath,permissions,this.output);const registry=registerCoreTools(new ToolRegistry(),{workspace,terminal,web:this.web,knowledgeSearch:this.workspaceIndex?(query,searchOptions)=>this.workspaceIndex.search(query,searchOptions):undefined});const model=config.provider==='openai'?new OpenAIAgentModel(this.client):new LlamaAgentModel(this.client);const runner=new AgentRunner(model,registry,workspace,history,permissions,this.output);this.activeRunner=runner;
+    const permissions=new PermissionService();const history=new AgentHistory(this.context,permissions,this.output);const workspace=new WorkspaceService(rootUri,permissions,history,this.output);await this.terminalService?.dispose();const terminal=new TerminalService(rootUri.fsPath,permissions,this.output);this.terminalService=terminal;const registry=registerCoreTools(new ToolRegistry(),{workspace,terminal,web:this.web,knowledgeSearch:this.workspaceIndex?(query,searchOptions)=>this.workspaceIndex.search(query,searchOptions):undefined});const model=config.provider==='openai'?new OpenAIAgentModel(this.client):new LlamaAgentModel(this.client);const runner=new AgentRunner(model,registry,workspace,history,permissions,this.output,terminal);this.activeRunner=runner;
     try {
       let research;
       let webResearchFailure;
@@ -53,9 +53,10 @@ class AgentController{
     } finally {if(this.activeRunner===runner)this.activeRunner=undefined;}
   }
   async rollback(){const permissions=new PermissionService();const history=new AgentHistory(this.context,permissions,this.output);const last=await history.loadLastSession();if(!last)throw new Error('No previous agent session is available to roll back.');const workspace=new WorkspaceService(vscode.Uri.file(last.rootPath),permissions,history,this.output);history.session=last;return history.rollback(workspace);}
+  async stopPreview(){return this.terminalService?this.terminalService.stopPreview():0;}
   setWebSearchApiKey(){return this.web.setApiKey();}
   clearWebSearchApiKey(){return this.web.clearApiKey();}
-  dispose(){}
+  dispose(){const terminal=this.terminalService;this.terminalService=undefined;if(terminal)void terminal.dispose().catch(error=>this.output?.appendLine(`[agent:preview:dispose:error] ${error instanceof Error?error.message:String(error)}`));}
 }
 function selectWorkspaceRoot(){const active=vscode.window.activeTextEditor?.document?.uri;if(active){const folder=vscode.workspace.getWorkspaceFolder(active);if(folder)return folder.uri;}return vscode.workspace.workspaceFolders?.[0]?.uri;}
 module.exports={AgentController,selectWorkspaceRoot};

@@ -328,10 +328,10 @@ class ChatPanel {
     const answer = result.answer || 'Tarefa concluída.';
     const sources = mergeSources(contextSources, result.sources);
     this.post({ type: 'assistantDelta', id: requestId, text: answer });
-    const assistantEntry = { role: 'assistant', text: answer, mode, timestamp: Date.now(), request, plan: result.plan, verification: result.verification, sources, webResearchStatus: result.webResearchStatus };
+    const assistantEntry = { role: 'assistant', text: answer, mode, timestamp: Date.now(), request, plan: result.plan, verification: result.verification, execution: result.execution, sources, webResearchStatus: result.webResearchStatus };
     this.transcript.push(assistantEntry);
     this.post({ type: 'assistantDone', id: requestId, timestamp: assistantEntry.timestamp, sources, webResearchStatus: result.webResearchStatus });
-    this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, steps: result.steps });
+    this.post({ type: 'agentResult', plan: result.plan, verification: result.verification, execution: result.execution, steps: result.steps });
   }
 
   html(webview) {

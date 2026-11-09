@@ -132,9 +132,17 @@ function ensureVerificationStep(steps, maxSteps) {
 
 function isMutationTool(name) { return MUTATION_TOOLS.has(String(name || '')); }
 
-function isVerificationTool(name, args = {}) {
+function isVerificationTool(name, args = {}, result) {
   const tool = String(name || '');
-  if (tool === 'get_errors') return true;
+  if (!result || result.ok === false) return false;
+  if (tool === 'get_errors') {
+    return Array.isArray(result.results) && !result.results.some(item => item?.severity === 'error');
+  }
+  return tool === 'run_terminal' && result.timedOut !== true && result.exitCode === 0 && isVerificationCommand(tool, args);
+}
+
+function isVerificationCommand(name, args = {}) {
+  const tool = String(name || '');
   if (tool !== 'run_terminal') return false;
   const command = String(args.command || args.cmd || '').toLowerCase();
   return /(^|\s|&&|;)(npm|pnpm|yarn|bun)\s+(run\s+)?(test|build|lint|check|typecheck)|\b(pytest|unittest|ruff|mypy|eslint|tsc|cargo\s+(test|check)|go\s+test|dotnet\s+test|mvn\s+test|gradle\s+test|make\s+(test|check))\b/.test(command);
@@ -156,4 +164,4 @@ function statusIcon(status) { return status === 'completed' ? '✓' : status ===
 function statusEmoji(status) { return status === 'completed' ? '✅' : status === 'running' ? '🔄' : status === 'failed' ? '❌' : '⬜'; }
 function clampInt(value, min, max, fallback) { const number = Math.floor(Number(value)); return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback; }
 
-module.exports = { createOperationalPlan, parsePlanContent, fallbackPlan, AgentPlanState, isMutationTool, isVerificationTool, normalizeKind };
+module.exports = { createOperationalPlan, parsePlanContent, fallbackPlan, AgentPlanState, isMutationTool, isVerificationTool, isVerificationCommand, normalizeKind };

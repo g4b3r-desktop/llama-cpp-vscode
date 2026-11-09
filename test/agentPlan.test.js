@@ -47,9 +47,12 @@ test('AgentPlanState exposes public lifecycle without reasoning', () => {
 test('mutation and verification tool classification', () => {
   assert.equal(isMutationTool('edit_file'), true);
   assert.equal(isMutationTool('read_file'), false);
-  assert.equal(isVerificationTool('get_errors', {}), true);
-  assert.equal(isVerificationTool('run_terminal', { command: 'npm test' }), true);
-  assert.equal(isVerificationTool('run_terminal', { command: 'pnpm run lint' }), true);
-  assert.equal(isVerificationTool('run_terminal', { command: 'pytest -q' }), true);
-  assert.equal(isVerificationTool('run_terminal', { command: 'ls -la' }), false);
+  assert.equal(isVerificationTool('get_errors', {}, { ok: true, results: [] }), true);
+  assert.equal(isVerificationTool('get_errors', {}, { ok: true, results: [{ severity: 'error' }] }), false);
+  assert.equal(isVerificationTool('run_terminal', { command: 'npm test' }, { ok: true, exitCode: 0 }), true);
+  assert.equal(isVerificationTool('run_terminal', { command: 'pnpm run lint' }, { ok: true, exitCode: 0 }), true);
+  assert.equal(isVerificationTool('run_terminal', { command: 'pytest -q' }, { ok: true, exitCode: 0 }), true);
+  assert.equal(isVerificationTool('run_terminal', { command: 'npm test' }, { ok: true, exitCode: 1 }), false);
+  assert.equal(isVerificationTool('run_terminal', { command: 'npm test' }, { ok: true, exitCode: 0, timedOut: true }), false);
+  assert.equal(isVerificationTool('run_terminal', { command: 'ls -la' }, { ok: true, exitCode: 0 }), false);
 });

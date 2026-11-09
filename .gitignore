@@ -5,5 +5,6 @@ dist/
 test/
 !test/
 test/*
+!test/autoRun.test.js
 !test/agentRunner.test.js
 !test/sourceReferences.test.js
